@@ -36,7 +36,7 @@ class OpenRouterProvider implements LLMProvider {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
+        'HTTP-Referer': process.env.NEXTPUBLICAPPURL ?? 'http://localhost:3000',
         'X-Title': 'CryptoClips',
       },
       body: JSON.stringify({
@@ -103,12 +103,12 @@ class StubLLMProvider implements LLMProvider {
 }
 
 export function createLLMProvider(): LLMProvider {
-  const apiKey = process.env.OPENROUTER_API_KEY
+  const apiKey = process.env.OPENROUTERAPIKEY
 
   if (apiKey && apiKey.length > 0) {
     return new OpenRouterProvider(apiKey)
   }
 
-  console.warn('[LLM] No OPENROUTER_API_KEY found, using stub provider')
+  console.warn('[LLM] No OPENROUTERAPIKEY found, using stub provider')
   return new StubLLMProvider()
 }
