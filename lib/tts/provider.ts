@@ -17,28 +17,43 @@ export interface TTSProvider {
 
 class EdgeTTSProvider implements TTSProvider {
   async synthesize(options: TTSOptions): Promise<TTSResult> {
-    const { text, voiceId, speed = 1.0 } = options
+    const { text, voiceId, speed = 1 } = options
 
     try {
-      const dynamicImport = new Function('moduleName', 'return import(moduleName)') as (
-        moduleName: string
-      ) => Promise<any>
+      const edgeTts = await import('edge-tts')
+      const Communicator =
+        (edgeTts as { Communicator?: new (...args: any[]) => any }).Communicator ||
+        (edgeTts as { default?: { Communicator?: new (...args: any[]) => any } }).default
+          ?.Communicator
 
-      const edgeTts = await dynamicImport('edge-tts')
-      const communicator = new edgeTts.Communicator()
+      if (!Communicator) {
+        throw new Error('edge-tts Communicator export not found')
+      }
 
-      const result = await communicator.synthesize(text, {
-        voice: voiceId,
-        rate: `${Math.round((speed - 1) * 100)}%`,
+      const ratePercent = Math.round((speed - 1) * 100)
+      const rate = `${ratePercent >= 0 ? '+' : ''}${ratePercent}%`
+
+      const communicator = new Communicator(text, voiceId, {
+        rate,
       })
 
+      const chunks: Buffer[] = []
+
+      for await (const chunk of communicator.stream()) {
+        if (chunk?.type === 'audio' && chunk.data) {
+          chunks.push(Buffer.isBuffer(chunk.data) ? chunk.data : Buffer.from(chunk.data))
+        }
+      }
+
+      const audioBuffer = Buffer.concat(chunks)
+
       return {
-        audioBuffer: Buffer.from(result.audio),
-        duration: result.duration ?? estimateDuration(text),
+        audioBuffer,
+        duration: estimateDuration(text),
         contentType: 'audio/mpeg',
       }
-    } catch (err) {
-      console.error('[EdgeTTS] Error:', err)
+    } catch (error) {
+      console.error('[TTS] Edge TTS synthesis failed:', error)
 
       return {
         audioBuffer: Buffer.alloc(0),
@@ -51,8 +66,6 @@ class EdgeTTSProvider implements TTSProvider {
 
 class StubTTSProvider implements TTSProvider {
   async synthesize(options: TTSOptions): Promise<TTSResult> {
-    console.log('[StubTTS] Would synthesize:', options.text.slice(0, 50) + '...')
-
     return {
       audioBuffer: Buffer.alloc(0),
       duration: estimateDuration(options.text),
@@ -64,14 +77,14 @@ class StubTTSProvider implements TTSProvider {
 export function createTTSProvider(): TTSProvider {
   const enabled = process.env.EDGETTSENABLED === 'true'
 
-  if (!enabled) {
-    return new StubTTSProvider()
+  if (enabled) {
+    return new EdgeTTSProvider()
   }
 
-  return new EdgeTTSProvider()
+  return new StubTTSProvider()
 }
 
 function estimateDuration(text: string): number {
-  const wordCount = text.split(/\s+/).filter(Boolean).length
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length
   return Math.max(2, Math.ceil(wordCount / 2.5))
 }
