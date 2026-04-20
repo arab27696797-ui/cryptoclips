@@ -1,6 +1,6 @@
-import { writeFile, mkdir, readFile } from 'fs/promises'
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
-import { join } from 'path'
+import path from 'path'
 
 export interface StorageProvider {
   upload(key: string, data: Buffer, contentType: string): Promise<string>
@@ -9,49 +9,51 @@ export interface StorageProvider {
   getPublicUrl(key: string): string
 }
 
-function normalizeKey(key: string): string {
-  return key.replace(/^\/uploads\//, '').replace(/^\/+/, '')
-}
-
-class LocalStorage implements StorageProvider {
-  private baseDir: string
+class LocalStorageProvider implements StorageProvider {
+  private readonly baseDir: string
 
   constructor() {
-    this.baseDir = join(process.cwd(), 'uploads')
+    this.baseDir = path.join(process.cwd(), 'uploads')
   }
 
   async upload(key: string, data: Buffer, _contentType: string): Promise<string> {
-    const normalized = normalizeKey(key)
-    const filePath = join(this.baseDir, normalized)
-    const dir = filePath.split('/').slice(0, -1).join('/')
+    const normalizedKey = normalizeKey(key)
+    const filePath = path.join(this.baseDir, normalizedKey)
+    const dirPath = path.dirname(filePath)
 
-    if (!existsSync(dir)) {
-      await mkdir(dir, { recursive: true })
+    if (!existsSync(dirPath)) {
+      await mkdir(dirPath, { recursive: true })
     }
 
     await writeFile(filePath, data)
-    return this.getPublicUrl(normalized)
+
+    return this.getPublicUrl(normalizedKey)
   }
 
   async download(key: string): Promise<Buffer> {
-    const normalized = normalizeKey(key)
-    const filePath = join(this.baseDir, normalized)
+    const normalizedKey = normalizeKey(key)
+    const filePath = path.join(this.baseDir, normalizedKey)
+
     return readFile(filePath)
   }
 
   async delete(key: string): Promise<void> {
-    const { unlink } = await import('fs/promises')
-    const normalized = normalizeKey(key)
-    const filePath = join(this.baseDir, normalized)
+    const normalizedKey = normalizeKey(key)
+    const filePath = path.join(this.baseDir, normalizedKey)
+
     await unlink(filePath)
   }
 
   getPublicUrl(key: string): string {
-    const normalized = normalizeKey(key)
-    return `/api/upload?path=${normalized}`
+    const normalizedKey = normalizeKey(key)
+    return `/api/upload?path=${encodeURIComponent(normalizedKey)}`
   }
 }
 
 export function createStorage(): StorageProvider {
-  return new LocalStorage()
+  return new LocalStorageProvider()
+}
+
+function normalizeKey(key: string): string {
+  return key.replace(/^\/+/, '').replace(/\\/g, '/')
 }
