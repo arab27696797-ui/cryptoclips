@@ -3,23 +3,29 @@ import { getVoiceById } from './voices'
 
 export interface VoiceoverResult {
   audioUrl: string | null
+  audioBuffer: Buffer | null
   duration: number
   voiceName: string
   status: 'generated' | 'placeholder' | 'error'
   error?: string
 }
 
-export async function generateVoiceover(params: {
+export interface GenerateVoiceoverParams {
   text: string
   voiceId: string
   projectId: string
-}): Promise<VoiceoverResult> {
+}
+
+export async function generateVoiceover(
+  params: GenerateVoiceoverParams,
+): Promise<VoiceoverResult> {
   const { text, voiceId } = params
   const voice = getVoiceById(voiceId)
 
   if (!voice) {
     return {
       audioUrl: null,
+      audioBuffer: null,
       duration: 0,
       voiceName: voiceId,
       status: 'error',
@@ -36,9 +42,10 @@ export async function generateVoiceover(params: {
       language: voice.language,
     })
 
-    if (result.audioBuffer.length === 0) {
+    if (!result.audioBuffer || result.audioBuffer.length === 0) {
       return {
         audioUrl: null,
+        audioBuffer: null,
         duration: result.duration,
         voiceName: voice.name,
         status: 'placeholder',
@@ -50,25 +57,27 @@ export async function generateVoiceover(params: {
 
     return {
       audioUrl: dataUrl,
+      audioBuffer: result.audioBuffer,
       duration: result.duration,
       voiceName: voice.name,
       status: 'generated',
     }
-  } catch (err) {
-    const wordCount = text.split(/\s+/).filter(Boolean).length
+  } catch (error) {
+    const wordCount = text.trim().split(/\s+/).filter(Boolean).length
     const duration = Math.max(2, Math.ceil(wordCount / 2.5))
 
     return {
       audioUrl: null,
+      audioBuffer: null,
       duration,
       voiceName: voice.name,
       status: 'error',
-      error: err instanceof Error ? err.message : 'TTS generation failed',
+      error: error instanceof Error ? error.message : 'TTS generation failed',
     }
   }
 }
 
 export function estimateScriptDuration(scriptText: string): number {
-  const wordCount = scriptText.split(/\s+/).filter(Boolean).length
+  const wordCount = scriptText.trim().split(/\s+/).filter(Boolean).length
   return Math.max(2, Math.ceil(wordCount / 2.5))
 }
