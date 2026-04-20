@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { requireAuth, getUserWorkspace } from '../../../../../lib/auth'
 import { prisma } from '../../../../../lib/db'
 import { generateVoiceover } from '../../../../../lib/tts/generator'
+import { listAllVoices } from '../../../../../lib/tts/voices'
 
 interface RouteContext {
   params: {
@@ -10,9 +11,9 @@ interface RouteContext {
   }
 }
 
-interface ScriptScene {
-  text: string
-  duration: number
+type SceneLike = {
+  text?: string
+  duration?: number
   visualHint?: string
 }
 
@@ -40,6 +41,16 @@ export async function POST(request: Request, { params }: RouteContext) {
           },
           take: 1,
         },
+        renderJobs: {
+          select: {
+            status: true,
+            createdAt: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
       },
     })
 
@@ -47,54 +58,87 @@ export async function POST(request: Request, { params }: RouteContext) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    const activeScript = project.scriptVersions[0]
+    const latestRender = project.renderJobs[0] ?? null
+    if (latestRender?.status === 'PENDING' || latestRender?.status === 'RENDERING') {
+      return NextResponse.json(
+        { error: 'Cannot generate voiceover while rendering is in progress' },
+        { status: 409 },
+      )
+    }
 
+    const activeScript = project.scriptVersions[0] ?? null
     if (!activeScript) {
-      return NextResponse.json({ error: 'Generate a script first' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Generate a script before creating a voiceover' },
+        { status: 400 },
+      )
     }
 
     const body = await safeJson(request)
     const voiceId = typeof body.voiceId === 'string' ? body.voiceId.trim() : ''
 
     if (!voiceId) {
-      return NextResponse.json({ error: 'Voice ID is required' }, { status: 400 })
+      return NextResponse.json({ error: 'voiceId is required' }, { status: 400 })
     }
 
-    const scenes = parseScenes(activeScript.scenes)
-    const fullScript = [activeScript.hook, ...scenes.map((scene) => scene.text), activeScript.cta]
-      .filter(Boolean)
-      .join(' ')
+    const voice = listAllVoices().find((item) => item.id === voiceId)
 
-    const result = await generateVoiceover({
-      text: fullScript,
-      voiceId,
-      projectId: project.id,
+    if (!voice) {
+      return NextResponse.json({ error: 'Voice not found' }, { status: 404 })
+    }
+
+    if (voice.language !== project.outputLanguage) {
+      return NextResponse.json(
+        { error: 'Selected voice does not match project language' },
+        { status: 400 },
+      )
+    }
+
+    const scriptText = buildVoiceoverText(activeScript)
+
+    if (!scriptText) {
+      return NextResponse.json(
+        { error: 'Active script has no usable text for voiceover' },
+        { status: 400 },
+      )
+    }
+
+    const generated = await generateVoiceover({
+      text: scriptText,
+      voiceId: voice.id,
+      language: project.outputLanguage,
     })
 
-    const voiceover = await prisma.voiceoverAsset.create({
+    const voiceover = await prisma.voiceover.create({
       data: {
         projectId: project.id,
         scriptVersionId: activeScript.id,
-        voiceId,
-        voiceName: result.voiceName,
-        language: project.outputLanguage,
-        audioUrl: result.audioUrl,
-        duration: result.duration,
-        status: result.status.toUpperCase() as 'GENERATED' | 'PLACEHOLDER' | 'ERROR',
-        error: result.error ?? null,
+        voiceId: voice.id,
+        voiceName: voice.name,
+        audioUrl: generated.audioUrl,
+        duration: generated.duration ?? activeScript.totalDuration ?? 0,
+        status: 'COMPLETED',
+        error: null,
+      },
+      select: {
+        id: true,
+        voiceId: true,
+        voiceName: true,
+        audioUrl: true,
+        duration: true,
+        status: true,
+        error: true,
       },
     })
 
-    if (result.status === 'generated' || result.status === 'placeholder') {
-      await prisma.project.update({
-        where: {
-          id: project.id,
-        },
-        data: {
-          status: 'READY',
-        },
-      })
-    }
+    await prisma.project.update({
+      where: {
+        id: project.id,
+      },
+      data: {
+        status: 'READY',
+      },
+    })
 
     return NextResponse.json({ voiceover }, { status: 201 })
   } catch (error) {
@@ -106,7 +150,8 @@ export async function POST(request: Request, { params }: RouteContext) {
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Voiceover generation failed',
+        error:
+          error instanceof Error ? error.message : 'Voiceover generation failed',
       },
       { status: 500 },
     )
@@ -121,35 +166,27 @@ async function safeJson(request: Request): Promise<Record<string, unknown>> {
   }
 }
 
-function parseScenes(value: unknown): ScriptScene[] {
-  if (!Array.isArray(value)) {
-    return []
+function buildVoiceoverText(script: {
+  hook?: string | null
+  cta?: string | null
+  scenes?: unknown
+}) {
+  const parts: string[] = []
+
+  if (script.hook?.trim()) {
+    parts.push(script.hook.trim())
   }
 
-  return value
-    .map((scene) => {
-      if (!scene || typeof scene !== 'object') {
-        return null
-      }
+  const scenes = Array.isArray(script.scenes) ? (script.scenes as SceneLike[]) : []
+  for (const scene of scenes) {
+    if (typeof scene?.text === 'string' && scene.text.trim()) {
+      parts.push(scene.text.trim())
+    }
+  }
 
-      const candidate = scene as Record<string, unknown>
-      const text = typeof candidate.text === 'string' ? candidate.text.trim() : ''
-      const duration =
-        typeof candidate.duration === 'number' && Number.isFinite(candidate.duration)
-          ? candidate.duration
-          : 5
-      const visualHint =
-        typeof candidate.visualHint === 'string' ? candidate.visualHint.trim() : undefined
+  if (script.cta?.trim()) {
+    parts.push(script.cta.trim())
+  }
 
-      if (!text) {
-        return null
-      }
-
-      return {
-        text,
-        duration: Math.max(2, Math.min(12, duration)),
-        visualHint,
-      }
-    })
-    .filter((scene): scene is ScriptScene => scene !== null)
+  return parts.join('\n\n').trim()
 }
