@@ -7,16 +7,24 @@ export interface ExtractionResult {
   error?: string
 }
 
+const REQUEST_TIMEOUT_MS = 15000
+const MIN_HTML_LENGTH = 100
+const MIN_TEXT_LENGTH = 50
+const MAX_TEXT_LENGTH = 8000
+
 export async function extractUrlContent(url: string): Promise<ExtractionResult> {
   try {
     const urlObj = new URL(url)
 
     if (!['http:', 'https:'].includes(urlObj.protocol)) {
-      return { success: false, error: 'Invalid URL protocol' }
+      return {
+        success: false,
+        error: 'Invalid URL protocol',
+      }
     }
 
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15000)
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
 
     const response = await fetch(url, {
       signal: controller.signal,
@@ -26,18 +34,23 @@ export async function extractUrlContent(url: string): Promise<ExtractionResult> 
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
       redirect: 'follow',
-    })
-
-    clearTimeout(timeout)
+      cache: 'no-store',
+    }).finally(() => clearTimeout(timeout))
 
     if (!response.ok) {
-      return { success: false, error: `HTTP ${response.status}` }
+      return {
+        success: false,
+        error: `HTTP ${response.status}`,
+      }
     }
 
     const html = await response.text()
 
-    if (!html || html.length < 100) {
-      return { success: false, error: 'Empty response' }
+    if (!html || html.length < MIN_HTML_LENGTH) {
+      return {
+        success: false,
+        error: 'Empty response',
+      }
     }
 
     const root = parse(html)
@@ -45,7 +58,7 @@ export async function extractUrlContent(url: string): Promise<ExtractionResult> 
     const title =
       root.querySelector('meta[property="og:title"]')?.getAttribute('content') ||
       root.querySelector('meta[name="twitter:title"]')?.getAttribute('content') ||
-      root.querySelector('title')?.text ||
+      root.querySelector('title')?.text?.trim() ||
       undefined
 
     let articleText = ''
@@ -71,63 +84,88 @@ export async function extractUrlContent(url: string): Promise<ExtractionResult> 
         '.content-body',
         '.article-body',
         '.story-body',
+        '.post-body',
       ]
 
       for (const selector of contentSelectors) {
         const el = root.querySelector(selector)
-        if (el) {
-          articleText = extractTextFromNode(el)
-          if (articleText.length > 200) break
-        }
+        if (!el) continue
+
+        articleText = extractTextFromNode(el)
+        if (articleText.length >= 200) break
       }
     }
 
     if (!articleText || articleText.length < 200) {
       const body = root.querySelector('body')
       if (body) {
-        const paragraphs = body.querySelectorAll('p')
-        articleText = paragraphs
-          .map((p) => p.text.trim())
-          .filter((t) => t.length > 30)
-          .join(' ')
+        const paragraphs = body
+          .querySelectorAll('p')
+          .map((p) => cleanText(p.text))
+          .filter((text) => text.length >= 30)
+
+        articleText = paragraphs.join(' ')
       }
     }
 
-    const cleanText = articleText
-      .replace(/\s{3,}/g, ' ')
-      .replace(/\n+/g, ' ')
-      .trim()
-      .slice(0, 8000)
+    const cleanArticleText = cleanText(articleText).slice(0, MAX_TEXT_LENGTH)
 
-    if (!cleanText || cleanText.length < 50) {
-      return { success: false, error: 'Could not extract meaningful content from page' }
+    if (!cleanArticleText || cleanArticleText.length < MIN_TEXT_LENGTH) {
+      return {
+        success: false,
+        error: 'Could not extract meaningful content from page',
+      }
     }
 
     return {
       success: true,
       title,
-      text: cleanText,
+      text: cleanArticleText,
     }
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      return { success: false, error: 'Request timed out after 15s' }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return {
+        success: false,
+        error: 'Request timed out after 15s',
+      }
     }
 
     return {
       success: false,
-      error: err instanceof Error ? err.message : 'Extraction failed',
+      error: error instanceof Error ? error.message : 'Extraction failed',
     }
   }
 }
 
 function extractTextFromNode(node: HTMLElement): string {
-  const removable = node.querySelectorAll('script, style, nav, header, footer, aside, .advertisement, .ads')
-  removable.forEach((el) => el.remove())
+  const removableSelectors = ['script', 'style', 'nav', 'header', 'footer', 'aside']
 
-  const paragraphs = node.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li')
+  for (const selector of removableSelectors) {
+    node.querySelectorAll(selector).forEach((el) => el.remove())
+  }
 
-  return paragraphs
-    .map((p) => p.text.trim())
-    .filter((t) => t.length > 0)
+  const classBasedRemovals = [
+    '.advertisement',
+    '.ads',
+    '.ad',
+    '.promo',
+    '.newsletter',
+    '.share',
+    '.social',
+  ]
+
+  for (const selector of classBasedRemovals) {
+    node.querySelectorAll(selector).forEach((el) => el.remove())
+  }
+
+  const blocks = node.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li')
+
+  return blocks
+    .map((el) => cleanText(el.text))
+    .filter(Boolean)
     .join(' ')
+}
+
+function cleanText(value: string): string {
+  return value.replace(/\s+/g, ' ').replace(/\u00a0/g, ' ').trim()
 }
