@@ -1,0 +1,341 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  emailVerified Boolean  @default(false)
+  role          UserRole @default(USER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspaces     Workspace[]
+  memberships    WorkspaceMember[]
+  magicLinks     MagicLink[]
+  passwordResets PasswordReset[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model MagicLink {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  email     String
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@map("magic_links")
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@map("password_resets")
+}
+
+model Workspace {
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  logoUrl             String?
+  primaryColor        String   @default("#F7931A")
+  secondaryColor      String   @default("#FFFFFF")
+  defaultLanguage     String   @default("en")
+  videosUsedThisMonth Int      @default(0)
+  currentPlanId       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner       User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId     String
+  members     WorkspaceMember[]
+  presets     BrandPreset[]
+  projects    Project[]
+  subscription Subscription?
+  invoices    Invoice[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id   String @id @default(cuid())
+  role String @default("EDITOR")
+
+  createdAt DateTime @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+
+  @@unique([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+model BrandPreset {
+  id              String  @id @default(cuid())
+  name            String
+  channelName     String?
+  primaryColor    String  @default("#F7931A")
+  secondaryColor  String  @default("#FFFFFF")
+  logoUrl         String?
+  defaultLanguage String  @default("en")
+  defaultVoice    String?
+  isDefault       Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+  projects    Project[]
+
+  @@map("brand_presets")
+}
+
+model Plan {
+  id             String @id @default(cuid())
+  tier           String @unique
+  name           String
+  priceMonthly   Int
+  priceYearly    Int
+  maxVideos      Int
+  maxVideoLength Int
+  maxTeamMembers Int
+  maxVoices      Int
+  storageGb      Int
+  features       Json   @default("[]")
+
+  createdAt DateTime @default(now())
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  status             SubscriptionStatus @default(INCOMPLETE)
+  videosQuota        Int                @default(0)
+  videosUsed         Int                @default(0)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String    @unique
+  plan        Plan      @relation(fields: [planId], references: [id])
+  planId      String
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  PAUSED
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  amount        Int
+  currency      String        @default("USDT")
+  status        InvoiceStatus @default(PENDING)
+  paidAt        DateTime?
+  cryptoAddress String?
+  txHash        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+}
+
+model Project {
+  id             String        @id @default(cuid())
+  name           String
+  status         ProjectStatus @default(DRAFT)
+  outputLanguage String        @default("en")
+  targetLength   Int           @default(45)
+  scriptAngle    String        @default("neutral")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId    String
+  preset         BrandPreset?    @relation(fields: [brandPresetId], references: [id])
+  brandPresetId  String?
+  sources        SourceInput[]
+  scriptVersions ScriptVersion[]
+  voiceovers     VoiceoverAsset[]
+  renderJobs     RenderJob[]
+  exportAssets   ExportAsset[]
+
+  @@map("projects")
+}
+
+enum ProjectStatus {
+  DRAFT
+  SCRIPTING
+  READY
+  RENDERING
+  COMPLETED
+  FAILED
+}
+
+model SourceInput {
+  id        String     @id @default(cuid())
+  type      SourceType
+  rawText   String?    @db.Text
+  sourceUrl String?
+  title     String?
+  extracted String?    @db.Text
+  error     String?
+
+  createdAt DateTime @default(now())
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+
+  @@map("source_inputs")
+}
+
+enum SourceType {
+  TEXT
+  URL
+  POST
+}
+
+model ScriptVersion {
+  id            String  @id @default(cuid())
+  versionNumber Int
+  hook          String  @db.Text
+  cta           String  @db.Text
+  scenes        Json    @default("[]")
+  totalDuration Int
+  angle         String  @default("neutral")
+  isActive      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  project    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId  String
+  voiceovers VoiceoverAsset[]
+
+  @@map("script_versions")
+}
+
+model VoiceoverAsset {
+  id        String          @id @default(cuid())
+  voiceId   String
+  voiceName String
+  language  String          @default("en")
+  audioUrl  String?         @db.Text
+  duration  Int             @default(0)
+  status    VoiceoverStatus @default(GENERATED)
+  error     String?
+
+  createdAt DateTime @default(now())
+
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId       String
+  scriptVersion   ScriptVersion @relation(fields: [scriptVersionId], references: [id], onDelete: Cascade)
+  scriptVersionId String
+
+  @@map("voiceover_assets")
+}
+
+enum VoiceoverStatus {
+  GENERATED
+  PLACEHOLDER
+  ERROR
+}
+
+model RenderJob {
+  id              String       @id @default(cuid())
+  status          RenderStatus @default(PENDING)
+  templateKey     String       @default("clean-news")
+  progressPercent Int          @default(0)
+  outputUrl       String?
+  outputDuration  Int?
+  outputFileSize  Int?
+  errorMessage    String?
+  retryCount      Int          @default(0)
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    String
+  exportAssets ExportAsset[]
+
+  @@map("render_jobs")
+}
+
+enum RenderStatus {
+  PENDING
+  RENDERING
+  COMPLETED
+  FAILED
+}
+
+model ExportAsset {
+  id         String @id @default(cuid())
+  fileUrl    String
+  fileSize   Int
+  duration   Int
+  format     String @default("mp4")
+  resolution String @default("1080x1920")
+
+  createdAt DateTime @default(now())
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId   String
+  renderJob   RenderJob @relation(fields: [renderJobId], references: [id], onDelete: Cascade)
+  renderJobId String
+
+  @@map("export_assets")
+}
