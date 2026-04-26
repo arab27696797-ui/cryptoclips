@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
-import { requireAuth, getUserWorkspace } from '../../../../../lib/auth'
-import { prisma } from '../../../../../lib/db'
+import { requireAuth, getUserWorkspace } from '@/lib/auth'
+import { prisma } from '@/lib/db'
 
 interface RouteContext {
   params: {
@@ -37,7 +37,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
         projectId: project.id,
       },
       include: {
-        exports: {
+        exportAssets: {
           select: {
             id: true,
             fileUrl: true,
@@ -68,7 +68,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
         errorMessage: render.errorMessage,
         retryCount: render.retryCount,
         createdAt: render.createdAt,
-        exports: render.exports.map((asset) => ({
+        exports: render.exportAssets.map((asset) => ({
           id: asset.id,
           fileUrl: asset.fileUrl,
           fileSize: asset.fileSize,
