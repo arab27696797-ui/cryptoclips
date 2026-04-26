@@ -1,8 +1,15 @@
-import { SignJWT, jwtVerify } from 'jose'
-import { compare, hash } from 'bcryptjs'
+import { cookies } from 'next/headers'
+import { jwtVerify } from 'jose'
 import { prisma } from './db'
 
-function getSecret() {
+interface JWTPayload {
+  sub: string
+  email: string
+  iat?: number
+  exp?: number
+}
+
+function getSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET
   if (!secret) {
     throw new Error('JWT_SECRET environment variable is not set')
@@ -10,63 +17,35 @@ function getSecret() {
   return new TextEncoder().encode(secret)
 }
 
-export async function hashPassword(password: string): Promise<string> {
-  return hash(password, 12)
-}
+export async function requireAuth(): Promise<JWTPayload> {
+  const cookieStore = await cookies()
+  const session = cookieStore.get('session')?.value
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return compare(password, hash)
-}
-
-export async function createToken(payload: { sub: string; email: string; role: string }): Promise<string> {
-  return new SignJWT(payload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime('7d')
-    .sign(getSecret())
-}
-
-export async function verifyToken(token: string) {
-  const { payload } = await jwtVerify(token, getSecret(), { clockTolerance: 60 })
-  return payload as { sub: string; email: string; role: string }
-}
-
-export async function getSession() {
-  try {
-    const { cookies } = await import('next/headers')
-    const cookieStore = cookies()
-    const token = cookieStore.get('session')?.value
-    if (!token) return null
-    return verifyToken(token)
-  } catch {
-    return null
-  }
-}
-
-export async function requireAuth() {
-  const session = await getSession()
   if (!session) {
     throw new Error('Unauthorized')
   }
-  return session
-}
 
-export async function getUserWithWorkspace(userId: string) {
-  return prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      workspaces: {
-        include: {
-          subscription: { include: { plan: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      },
-    },
-  })
+  try {
+    const verified = await jwtVerify(session, getSecret(), { clockTolerance: 60 })
+    return verified.payload as JWTPayload
+  } catch {
+    throw new Error('Unauthorized')
+  }
 }
 
 export async function getUserWorkspace(userId: string) {
-  const user = await getUserWithWorkspace(userId)
-  return user?.workspaces[0] ?? null
+  const workspace = await prisma.workspace.findFirst({
+    where: {
+      ownerId: userId,
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      videosUsedThisMonth: true,
+      currentPlanId: true,
+    },
+  })
+
+  return workspace
 }
