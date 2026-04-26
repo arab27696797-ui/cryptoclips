@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
-
-import { requireAuth, getUserWorkspace } from '../../../../lib/auth'
-import { prisma } from '../../../../lib/db'
+import { requireAuth, getUserWorkspace } from '@/lib/auth'
+import { prisma } from '@/lib/db'
 
 export async function GET() {
   try {
@@ -28,7 +27,8 @@ export async function GET() {
     })
 
     const videosUsedThisMonth = workspace.videosUsedThisMonth ?? 0
-    const maxVideos = subscription?.plan?.maxVideos ?? 0
+    const generationsQuota = subscription?.generationsQuota ?? 0
+    const generationsUsed = subscription?.generationsUsed ?? 0
 
     return NextResponse.json({
       workspace: {
@@ -40,21 +40,26 @@ export async function GET() {
         ? {
             tier: subscription.plan.tier,
             name: subscription.plan.name,
-            maxVideos: subscription.plan.maxVideos,
+            generationsPerMonth: subscription.plan.generationsPerMonth,
             maxVideoLength: subscription.plan.maxVideoLength,
           }
         : null,
       usage: {
         videosUsedThisMonth,
-        videosRemaining: Math.max(0, maxVideos - videosUsedThisMonth),
+        generationsQuota,
+        generationsUsed,
+        generationsRemaining: Math.max(0, generationsQuota - generationsUsed),
         presetsCount,
       },
       subscription: subscription
         ? {
             status: subscription.status,
+            autoRenew: subscription.autoRenew,
+            canceledAt: subscription.canceledAt?.toISOString() ?? null,
+            currentPeriodStart: subscription.currentPeriodStart?.toISOString() ?? null,
             currentPeriodEnd: subscription.currentPeriodEnd?.toISOString() ?? null,
-            videosQuota: subscription.videosQuota,
-            videosUsed: subscription.videosUsed,
+            generationsQuota: subscription.generationsQuota,
+            generationsUsed: subscription.generationsUsed,
           }
         : null,
     })
