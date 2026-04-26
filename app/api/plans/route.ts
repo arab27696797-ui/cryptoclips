@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server'
-
-import { requireAuth } from '../../../lib/auth'
-import { prisma } from '../../../lib/db'
+import { prisma } from '@/lib/db'
 
 const TIER_ORDER: Record<string, number> = {
   STARTER: 1,
@@ -11,8 +9,6 @@ const TIER_ORDER: Record<string, number> = {
 
 export async function GET() {
   try {
-    await requireAuth()
-
     const plans = await prisma.plan.findMany({
       select: {
         id: true,
@@ -20,11 +16,12 @@ export async function GET() {
         name: true,
         priceMonthly: true,
         priceYearly: true,
-        maxVideos: true,
+        generationsPerMonth: true,
         maxVideoLength: true,
         maxTeamMembers: true,
         maxVoices: true,
         storageGb: true,
+        features: true,
       },
     })
 
@@ -41,12 +38,7 @@ export async function GET() {
 
     return NextResponse.json({ plans: sortedPlans })
   } catch (error) {
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
     console.error('Plans GET error:', error)
-
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
