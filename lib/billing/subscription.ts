@@ -23,36 +23,28 @@ export async function activateSubscription(params: {
     where: { workspaceId },
   })
 
-  let subscription
-
-  if (existingSub) {
-    subscription = await prisma.subscription.update({
-      where: { workspaceId },
-      data: {
-        planId,
-        status: 'ACTIVE',
-        generationsQuota: plan.generationsPerMonth,
-        generationsUsed: 0,
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        autoRenew: true,
-        canceledAt: null,
-      },
-    })
-  } else {
-    subscription = await prisma.subscription.create({
-      data: {
-        workspaceId,
-        planId,
-        status: 'ACTIVE',
-        generationsQuota: plan.generationsPerMonth,
-        generationsUsed: 0,
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        autoRenew: true,
-      },
-    })
+  const baseData = {
+    planId,
+    status: 'ACTIVE' as const,
+    generationsQuota: plan.generationsPerMonth,
+    generationsUsed: 0,
+    currentPeriodStart: now,
+    currentPeriodEnd: periodEnd,
+    autoRenew: true,
+    canceledAt: null,
   }
+
+  const subscription = existingSub
+    ? await prisma.subscription.update({
+        where: { workspaceId },
+        data: baseData,
+      })
+    : await prisma.subscription.create({
+        data: {
+          workspaceId,
+          ...baseData,
+        },
+      })
 
   await prisma.invoice.update({
     where: { id: invoiceId },
@@ -94,6 +86,8 @@ export async function renewSubscription(workspaceId: string) {
       generationsUsed: 0,
       currentPeriodStart: now,
       currentPeriodEnd: newPeriodEnd,
+      status: 'ACTIVE',
+      canceledAt: null,
     },
   })
 
@@ -101,6 +95,7 @@ export async function renewSubscription(workspaceId: string) {
     where: { id: workspaceId },
     data: {
       videosUsedThisMonth: 0,
+      currentPlanId: subscription.planId,
     },
   })
 
@@ -129,15 +124,13 @@ export async function cancelAutoRenew(workspaceId: string) {
     throw new Error('Subscription not found')
   }
 
-  const updated = await prisma.subscription.update({
+  return prisma.subscription.update({
     where: { workspaceId },
     data: {
       autoRenew: false,
       canceledAt: new Date(),
     },
   })
-
-  return updated
 }
 
 export async function incrementGenerationsUsed(workspaceId: string) {
@@ -179,21 +172,50 @@ export async function checkGenerationsQuota(workspaceId: string): Promise<{
     where: { workspaceId },
   })
 
-  if (!subscription || subscription.status !== 'ACTIVE') {
+  if (!subscription) {
     return { hasQuota: false, used: 0, quota: 0 }
+  }
+
+  if (subscription.status !== 'ACTIVE') {
+    return {
+      hasQuota: false,
+      used: subscription.generationsUsed,
+      quota: subscription.generationsQuota,
+    }
   }
 
   const now = new Date()
   const periodEnd = subscription.currentPeriodEnd
 
   if (periodEnd && now > periodEnd) {
-    return { hasQuota: false, used: subscription.generationsUsed, quota: subscription.generationsQuota }
+    if (subscription.autoRenew) {
+      const renewed = await renewSubscription(workspaceId)
+
+      if (renewed) {
+        return {
+          hasQuota: true,
+          used: renewed.subscription.generationsUsed,
+          quota: renewed.subscription.generationsQuota,
+        }
+      }
+    }
+
+    await prisma.subscription.update({
+      where: { workspaceId },
+      data: {
+        status: 'CANCELED',
+      },
+    })
+
+    return {
+      hasQuota: false,
+      used: subscription.generationsUsed,
+      quota: subscription.generationsQuota,
+    }
   }
 
-  const hasQuota = subscription.generationsUsed < subscription.generationsQuota
-
   return {
-    hasQuota,
+    hasQuota: subscription.generationsUsed < subscription.generationsQuota,
     used: subscription.generationsUsed,
     quota: subscription.generationsQuota,
   }
