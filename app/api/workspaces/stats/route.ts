@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireAuth, getUserWorkspace } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { checkGenerationsQuota } from '@/lib/billing/subscription'
 
 export async function GET() {
   try {
@@ -10,6 +11,18 @@ export async function GET() {
     if (!workspace) {
       return NextResponse.json({ error: 'No workspace found' }, { status: 404 })
     }
+
+    await checkGenerationsQuota(workspace.id)
+
+    const freshWorkspace = await prisma.workspace.findUnique({
+      where: { id: workspace.id },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        videosUsedThisMonth: true,
+      },
+    })
 
     const subscription = await prisma.subscription.findUnique({
       where: {
@@ -26,7 +39,7 @@ export async function GET() {
       },
     })
 
-    const videosUsedThisMonth = workspace.videosUsedThisMonth ?? 0
+    const videosUsedThisMonth = freshWorkspace?.videosUsedThisMonth ?? 0
     const generationsQuota = subscription?.generationsQuota ?? 0
     const generationsUsed = subscription?.generationsUsed ?? 0
 
