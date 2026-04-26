@@ -4,9 +4,11 @@ import { jwtVerify } from 'jose'
 
 function getSecret() {
   const secret = process.env.JWT_SECRET
+
   if (!secret) {
     throw new Error('JWT_SECRET environment variable is not set')
   }
+
   return new TextEncoder().encode(secret)
 }
 
@@ -42,13 +44,15 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/api/templates') ||
     request.nextUrl.pathname.startsWith('/api/renders') ||
     request.nextUrl.pathname.startsWith('/api/upload') ||
-    request.nextUrl.pathname.startsWith('/api/webhooks')
+    request.nextUrl.pathname.startsWith('/api/webhooks') ||
+    request.nextUrl.pathname.startsWith('/api/billing')
 
   if (isProtected) {
     if (!session) {
       if (request.nextUrl.pathname.startsWith('/api')) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       }
+
       return NextResponse.redirect(new URL('/sign-in', request.url))
     }
 
@@ -58,7 +62,10 @@ export async function middleware(request: NextRequest) {
     } catch {
       const response = isAuthPage
         ? NextResponse.next()
-        : NextResponse.redirect(new URL('/sign-in', request.url))
+        : request.nextUrl.pathname.startsWith('/api')
+          ? NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+          : NextResponse.redirect(new URL('/sign-in', request.url))
+
       response.cookies.set('session', '', { maxAge: 0, path: '/' })
       return response
     }
