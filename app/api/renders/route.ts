@@ -29,9 +29,13 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { projectId, templateKey } = body
+    const projectId = typeof body?.projectId === 'string' ? body.projectId : null
+    const templateKey =
+      typeof body?.templateKey === 'string' && body.templateKey.trim().length > 0
+        ? body.templateKey.trim()
+        : 'clean-news'
 
-    if (!projectId || typeof projectId !== 'string') {
+    if (!projectId) {
       return NextResponse.json({ error: 'Invalid projectId' }, { status: 400 })
     }
 
@@ -78,7 +82,7 @@ export async function POST(request: Request) {
       data: {
         projectId: project.id,
         status: 'PENDING',
-        templateKey: templateKey ?? 'clean-news',
+        templateKey,
         progressPercent: 0,
       },
     })
@@ -92,7 +96,7 @@ export async function POST(request: Request) {
       },
     })
 
-    await incrementGenerationsUsed(workspace.id)
+    const updatedSubscription = await incrementGenerationsUsed(workspace.id)
 
     return NextResponse.json({
       success: true,
@@ -103,7 +107,20 @@ export async function POST(request: Request) {
         progressPercent: renderJob.progressPercent,
         createdAt: renderJob.createdAt,
       },
-      quotaRemaining: quotaCheck.quota - quotaCheck.used - 1,
+      usage: updatedSubscription
+        ? {
+            used: updatedSubscription.generationsUsed,
+            quota: updatedSubscription.generationsQuota,
+            remaining: Math.max(
+              0,
+              updatedSubscription.generationsQuota - updatedSubscription.generationsUsed,
+            ),
+          }
+        : {
+            used: quotaCheck.used + 1,
+            quota: quotaCheck.quota,
+            remaining: Math.max(0, quotaCheck.quota - quotaCheck.used - 1),
+          },
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
