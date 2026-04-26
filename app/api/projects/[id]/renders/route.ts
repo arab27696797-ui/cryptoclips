@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 
-import { requireAuth, getUserWorkspace } from '../../../../lib/auth'
-import { prisma } from '../../../../lib/db'
-import { enqueueRenderJob } from '../../../../lib/render'
+import { requireAuth, getUserWorkspace } from ''@/lib/auth''
+import { prisma } from '@/lib/db'
+import { enqueueRenderJob } from '@/lib/render'
 
 interface RouteContext {
   params: {
