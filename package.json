@@ -10,7 +10,7 @@
     "dbgenerate": "prisma generate",
     "dbmigrate": "prisma migrate dev",
     "dbstudio": "prisma studio",
-    "dbseed": "tsx prismaseed.ts",
+    "dbseed": "tsx prisma/seed.ts",
     "dbpush": "prisma db push"
   },
   "dependencies": {
