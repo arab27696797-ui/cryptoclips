@@ -126,7 +126,7 @@ model Plan {
   name           String
   priceMonthly   Int
   priceYearly    Int
-  maxVideos      Int
+  generationsPerMonth Int
   maxVideoLength Int
   maxTeamMembers Int
   maxVoices      Int
@@ -143,10 +143,13 @@ model Plan {
 model Subscription {
   id                 String             @id @default(cuid())
   status             SubscriptionStatus @default(INCOMPLETE)
-  videosQuota        Int                @default(0)
-  videosUsed         Int                @default(0)
+  generationsQuota   Int                @default(0)
+  generationsUsed    Int                @default(0)
   currentPeriodStart DateTime?
   currentPeriodEnd   DateTime?
+  autoRenew          Boolean            @default(true)
+  canceledAt         DateTime?
+  tributeSubscriptionId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -170,11 +173,14 @@ enum SubscriptionStatus {
 model Invoice {
   id            String        @id @default(cuid())
   amount        Int
-  currency      String        @default("USDT")
+  currency      String        @default("USD")
   status        InvoiceStatus @default(PENDING)
   paidAt        DateTime?
-  cryptoAddress String?
-  txHash        String?
+  tributePaymentId String?
+  tributeCheckoutUrl String?
+  planId        String?
+  billingPeriodStart DateTime?
+  billingPeriodEnd   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
