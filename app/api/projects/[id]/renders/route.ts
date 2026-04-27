@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 
 import { requireAuth, getUserWorkspace } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { enqueueRenderJob } from '@/lib/render'
 
 interface RouteContext {
   params: {
@@ -10,7 +9,7 @@ interface RouteContext {
   }
 }
 
-export async function POST(_request: Request, { params }: RouteContext) {
+export async function POST(request: Request, { params }: RouteContext) {
   try {
     const session = await requireAuth()
     const workspace = await getUserWorkspace(session.sub)
@@ -110,43 +109,45 @@ export async function POST(_request: Request, { params }: RouteContext) {
       },
     })
 
-    try {
-      await enqueueRenderJob(renderJob.id)
-    } catch (queueError) {
-      await prisma.renderJob.update({
-        where: {
-          id: renderJob.id,
-        },
-        data: {
-          status: 'FAILED',
-          errorMessage:
-            queueError instanceof Error ? queueError.message : 'Failed to queue render',
-        },
-      })
+    // Делегируем реальный retry в /api/renders/[id]
+    const url = new URL(request.url)
+    const origin = `${url.protocol}//${url.host}`
 
-      await prisma.project.update({
-        where: {
-          id: renderJob.projectId,
-        },
-        data: {
-          status: 'READY',
-        },
-      })
+    const retryResponse = await fetch(`${origin}/api/renders/${renderJob.id}`, {
+      method: 'POST',
+      headers: {
+        // Пробрасываем куки/авторизацию, чтобы requireAuth в renders/[id] отработал.
+        cookie: request.headers.get('cookie') ?? '',
+      },
+    })
 
-      throw queueError
+    const retryJson = await retryResponse.json()
+
+    if (!retryResponse.ok) {
+      return NextResponse.json(
+        {
+          error: retryJson?.error ?? 'Failed to retry render',
+          renderJob: updated,
+        },
+        { status: retryResponse.status },
+      )
     }
 
-    return NextResponse.json({ renderJob: updated })
+    return NextResponse.json({
+      renderJob: updated,
+      result: retryJson,
+    })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    console.error('Render Retry POST error:', error)
+    console.error('Project Render Retry POST error:', error)
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'Failed to retry render',
+        error:
+          error instanceof Error ? error.message : 'Failed to retry render',
       },
       { status: 500 },
     )
