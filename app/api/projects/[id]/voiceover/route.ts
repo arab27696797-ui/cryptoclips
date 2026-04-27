@@ -109,7 +109,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       voiceId: voice.id,
     })
 
-    const voiceover = await prisma.voiceover.create({
+    const voiceover = await prisma.voiceoverAsset.create({
       data: {
         projectId: project.id,
         scriptVersionId: activeScript.id,
