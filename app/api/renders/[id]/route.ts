@@ -354,32 +354,34 @@ function parseScenes(value: unknown): ScriptScene[] {
     return []
   }
 
-  return value
-    .map((scene) => {
-      if (!scene || typeof scene !== 'object') {
-        return null
-      }
+  const scenes: ScriptScene[] = []
 
-      const candidate = scene as Record<string, unknown>
-      const text = typeof candidate.text === 'string' ? candidate.text.trim() : ''
-      const duration =
-        typeof candidate.duration === 'number' && Number.isFinite(candidate.duration)
-          ? candidate.duration
-          : 5
-      const visualHint =
-        typeof candidate.visualHint === 'string' ? candidate.visualHint.trim() : undefined
+  for (const scene of value) {
+    if (!scene || typeof scene !== 'object') {
+      continue
+    }
 
-      if (!text) {
-        return null
-      }
+    const candidate = scene as Record<string, unknown>
+    const text = typeof candidate.text === 'string' ? candidate.text.trim() : ''
+    const duration =
+      typeof candidate.duration === 'number' && Number.isFinite(candidate.duration)
+        ? candidate.duration
+        : 5
+    const visualHint =
+      typeof candidate.visualHint === 'string' ? candidate.visualHint.trim() : undefined
 
-      return {
-        text,
-        duration: Math.max(2, Math.min(12, duration)),
-        visualHint,
-      }
+    if (!text) {
+      continue
+    }
+
+    scenes.push({
+      text,
+      duration: Math.max(2, Math.min(12, duration)),
+      visualHint,
     })
-    .filter((scene): scene is ScriptScene => scene !== null)
+  }
+
+  return scenes
 }
 
 function decodeDataUrlToBuffer(dataUrl: string | null): Buffer | null {
