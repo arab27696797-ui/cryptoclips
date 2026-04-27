@@ -106,7 +106,6 @@ export async function POST(request: Request, { params }: RouteContext) {
     const generated = await generateVoiceover({
       text: scriptText,
       voiceId: voice.id,
-      language: project.outputLanguage,
     })
 
     const voiceover = await prisma.voiceover.create({
