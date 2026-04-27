@@ -104,6 +104,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     }
 
     const generated = await generateVoiceover({
+      projectId: project.id,
       text: scriptText,
       voiceId: voice.id,
     })
