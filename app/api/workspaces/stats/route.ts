@@ -1,28 +1,18 @@
-import { NextResponse } from 'next/server'
-import { requireAuth, getUserWorkspace } from '@/lib/auth'
-import { prisma } from '@/lib/db'
-import { checkGenerationsQuota } from '@/lib/billing/subscription'
+import { NextResponse } from "next/server";
+import { requireAuth, getUserWorkspace } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 
 export async function GET() {
   try {
-    const session = await requireAuth()
-    const workspace = await getUserWorkspace(session.sub)
+    const session = await requireAuth();
+    const workspace = await getUserWorkspace(session.sub);
 
     if (!workspace) {
-      return NextResponse.json({ error: 'No workspace found' }, { status: 404 })
+      return NextResponse.json(
+        { error: "No workspace found" },
+        { status: 404 }
+      );
     }
-
-    await checkGenerationsQuota(workspace.id)
-
-    const freshWorkspace = await prisma.workspace.findUnique({
-      where: { id: workspace.id },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        videosUsedThisMonth: true,
-      },
-    })
 
     const subscription = await prisma.subscription.findUnique({
       where: {
@@ -31,17 +21,17 @@ export async function GET() {
       include: {
         plan: true,
       },
-    })
+    });
 
     const presetsCount = await prisma.brandPreset.count({
       where: {
         workspaceId: workspace.id,
       },
-    })
+    });
 
-    const videosUsedThisMonth = freshWorkspace?.videosUsedThisMonth ?? 0
-    const generationsQuota = subscription?.generationsQuota ?? 0
-    const generationsUsed = subscription?.generationsUsed ?? 0
+    const videosUsedThisMonth = workspace.videosUsedThisMonth ?? 0;
+    const generationsQuota = subscription?.generationsQuota ?? 0;
+    const generationsUsed = subscription?.generationsUsed ?? 0;
 
     return NextResponse.json({
       workspace: {
@@ -69,19 +59,25 @@ export async function GET() {
             status: subscription.status,
             autoRenew: subscription.autoRenew,
             canceledAt: subscription.canceledAt?.toISOString() ?? null,
-            currentPeriodStart: subscription.currentPeriodStart?.toISOString() ?? null,
-            currentPeriodEnd: subscription.currentPeriodEnd?.toISOString() ?? null,
+            currentPeriodStart:
+              subscription.currentPeriodStart?.toISOString() ?? null,
+            currentPeriodEnd:
+              subscription.currentPeriodEnd?.toISOString() ?? null,
             generationsQuota: subscription.generationsQuota,
             generationsUsed: subscription.generationsUsed,
           }
         : null,
-    })
+    });
   } catch (error) {
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    console.error('Workspaces Stats GET error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("Workspace Stats GET error:", error);
+
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
