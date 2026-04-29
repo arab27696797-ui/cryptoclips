@@ -6,7 +6,7 @@ import { CheckCircle, Video } from 'lucide-react';
 export const metadata = {
   title: 'Pricing - CryptoClips',
   description:
-    'Simple, transparent pricing for crypto content creators. Start with a free trial.',
+    'Simple, transparent pricing for crypto content creators. Choose your plan and start creating.',
 };
 
 const plans = [
@@ -23,7 +23,7 @@ const plans = [
       'Brand presets',
       'Basic support',
     ],
-    cta: 'Start Free Trial',
+    cta: 'Get Started',
     popular: false,
   },
   {
@@ -40,7 +40,7 @@ const plans = [
       'Priority support',
       'Advanced customization',
     ],
-    cta: 'Start Free Trial',
+    cta: 'Get Started',
     popular: true,
   },
   {
@@ -58,7 +58,7 @@ const plans = [
       'Advanced customization',
       'API access (coming soon)',
     ],
-    cta: 'Start Free Trial',
+    cta: 'Get Started',
     popular: false,
   },
 ];
@@ -87,7 +87,7 @@ export default function PricingPage() {
                 size="sm"
                 className="bg-gradient-to-r from-orange-500 to-pink-600 hover:from-orange-600 hover:to-pink-700"
               >
-                Start Free Trial
+                Get Started
               </Button>
             </Link>
           </div>
@@ -102,8 +102,7 @@ export default function PricingPage() {
               Simple, Transparent Pricing
             </h1>
             <p className="mt-4 text-xl text-gray-600">
-              Start with a 7-day free trial. No credit card required. Cancel
-              anytime.
+              Choose your plan and start creating viral crypto content today.
             </p>
           </div>
 
