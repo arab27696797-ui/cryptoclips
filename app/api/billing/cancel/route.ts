@@ -1,40 +1,45 @@
-import { NextResponse } from 'next/server'
-import { requireAuth, getUserWorkspace } from '@/lib/auth'
-import { cancelAutoRenew } from '@/lib/billing/subscription'
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
+import { requireAuth, requireWorkspace } from '@/lib/auth/session';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const session = await requireAuth()
-    const workspace = await getUserWorkspace(session.sub)
+    const session = await requireAuth();
+    const workspace = await requireWorkspace();
 
-    if (!workspace) {
-      return NextResponse.json({ error: 'No workspace found' }, { status: 404 })
+    if (!workspace.subscription) {
+      return NextResponse.json(
+        { error: 'No active subscription found' },
+        { status: 404 }
+      );
     }
 
-    const subscription = await cancelAutoRenew(workspace.id)
+    // Cancel auto-renewal (subscription remains active until period end)
+    const updatedSubscription = await prisma.subscription.update({
+      where: { id: workspace.subscription.id },
+      data: {
+        autoRenew: false,
+        canceledAt: new Date(),
+      },
+      include: {
+        plan: true,
+      },
+    });
 
     return NextResponse.json({
-      success: true,
-      subscription: {
-        id: subscription.id,
-        status: subscription.status,
-        autoRenew: subscription.autoRenew,
-        canceledAt: subscription.canceledAt?.toISOString() ?? null,
-        currentPeriodEnd: subscription.currentPeriodEnd?.toISOString() ?? null,
-      },
-      message: 'Auto-renewal has been canceled. Your subscription will remain active until the end of the current billing period.',
-    })
+      subscription: updatedSubscription,
+      message: 'Auto-renewal canceled. Your subscription will remain active until the end of the current billing period.',
+    });
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.message === 'Unauthorized') {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-      }
-      if (error.message === 'Subscription not found') {
-        return NextResponse.json({ error: 'Subscription not found' }, { status: 404 })
-      }
+    console.error('Cancel subscription error:', error);
+
+    if (error instanceof Error && error.message === 'Authentication required') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    console.error('Cancel auto-renew POST error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Failed to cancel subscription' },
+      { status: 500 }
+    );
   }
 }
