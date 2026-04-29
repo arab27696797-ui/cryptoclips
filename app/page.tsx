@@ -78,7 +78,7 @@ export default function HomePage() {
                 size="sm"
                 className="bg-gradient-to-r from-orange-500 to-pink-600 hover:from-orange-600 hover:to-pink-700"
               >
-                Start Free Trial
+                Get Started
               </Button>
             </Link>
           </div>
@@ -113,7 +113,7 @@ export default function HomePage() {
                   size="lg"
                   className="gap-2 bg-gradient-to-r from-orange-500 to-pink-600 px-8 text-lg hover:from-orange-600 hover:to-pink-700"
                 >
-                  Start Free Trial
+                  Get Started
                   <ArrowRight className="h-5 w-5" />
                 </Button>
               </Link>
@@ -125,7 +125,7 @@ export default function HomePage() {
             </div>
 
             <p className="mt-6 text-sm text-gray-500">
-              7-day free trial • 15 generations included • No credit card required
+              Start creating professional crypto videos today
             </p>
           </div>
 
@@ -339,7 +339,7 @@ export default function HomePage() {
                 size="lg"
                 className="gap-2 bg-white px-8 text-lg text-orange-600 hover:bg-gray-100"
               >
-                Start Free Trial
+                Get Started
                 <ArrowRight className="h-5 w-5" />
               </Button>
             </Link>
@@ -354,7 +354,7 @@ export default function HomePage() {
             </Link>
           </div>
           <p className="mt-6 text-sm opacity-75">
-            No credit card required • 7-day trial • Cancel anytime
+            Secure crypto payments • Cancel anytime • Keep access until period ends
           </p>
         </div>
       </section>
