@@ -10,6 +10,7 @@
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
+    "generate-templates": "tsx scripts/generate-templates.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
@@ -23,6 +24,7 @@
     "@radix-ui/react-select": "^2.0.0",
     "@radix-ui/react-slot": "^1.0.2",
     "bcryptjs": "^2.4.3",
+    "canvas": "^2.11.2",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "jose": "^5.2.0",
