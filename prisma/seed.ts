@@ -1,88 +1,108 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
 
 async function main() {
-  const plans = [
-    {
-      tier: 'STARTER',
+  console.log('Starting database seed...');
+
+  // Clear existing data
+  await prisma.renderJob.deleteMany();
+  await prisma.scriptVersion.deleteMany();
+  await prisma.project.deleteMany();
+  await prisma.brandPreset.deleteMany();
+  await prisma.invoice.deleteMany();
+  await prisma.subscription.deleteMany();
+  await prisma.workspace.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.plan.deleteMany();
+
+  console.log('Cleared existing data');
+
+  // Create Plans
+  const starterPlan = await prisma.plan.create({
+    data: {
       name: 'Starter',
-      priceMonthly: 1900,
-      priceYearly: 19000,
-      generationsPerMonth: 100,
-      maxVideoLength: 60,
-      maxTeamMembers: 1,
-      maxVoices: 5,
-      storageGb: 10,
-      features: JSON.stringify([
-        '100 video generations/month',
-        'Up to 60s per video',
-        '5 AI voices',
-        '10GB storage',
-        'All templates',
-        'Email support',
-      ]),
+      slug: 'starter',
+      description: 'Perfect for getting started with crypto content creation',
+      price: 19.00,
+      currency: 'USD',
+      interval: 'month',
+      generationsPerMonth: 15,
+      features: [
+        '15 video generations per month',
+        'All video templates',
+        'AI script generation',
+        'Text-to-speech voices',
+        'Brand presets',
+        'Basic support',
+      ],
+      isActive: true,
     },
-    {
-      tier: 'PRO',
+  });
+
+  const proPlan = await prisma.plan.create({
+    data: {
       name: 'Pro',
-      priceMonthly: 4900,
-      priceYearly: 49000,
-      generationsPerMonth: 300,
-      maxVideoLength: 90,
-      maxTeamMembers: 5,
-      maxVoices: 15,
-      storageGb: 50,
-      features: JSON.stringify([
-        '300 video generations/month',
-        'Up to 90s per video',
-        '15 AI voices',
-        '50GB storage',
-        'All templates',
-        'Priority rendering',
+      slug: 'pro',
+      description: 'For professional creators and teams',
+      price: 49.00,
+      currency: 'USD',
+      interval: 'month',
+      generationsPerMonth: 40,
+      features: [
+        '40 video generations per month',
+        'All video templates',
+        'AI script generation',
+        'Text-to-speech voices',
+        'Unlimited brand presets',
         'Priority support',
-      ]),
+        'Advanced customization',
+      ],
+      isActive: true,
     },
-    {
-      tier: 'CREATOR',
+  });
+
+  const creatorPlan = await prisma.plan.create({
+    data: {
       name: 'Creator',
-      priceMonthly: 9900,
-      priceYearly: 99000,
-      generationsPerMonth: 1000,
-      maxVideoLength: 120,
-      maxTeamMembers: 15,
-      maxVoices: 50,
-      storageGb: 200,
-      features: JSON.stringify([
-        '1000 video generations/month',
-        'Up to 120s per video',
-        '50 AI voices',
-        '200GB storage',
-        'All templates + custom branding',
-        'Priority rendering',
-        'API access',
+      slug: 'creator',
+      description: 'For agencies and high-volume content production',
+      price: 99.00,
+      currency: 'USD',
+      interval: 'month',
+      generationsPerMonth: 90,
+      features: [
+        '90 video generations per month',
+        'All video templates',
+        'AI script generation',
+        'Text-to-speech voices',
+        'Unlimited brand presets',
         'Dedicated support',
-      ]),
+        'Advanced customization',
+        'API access (coming soon)',
+      ],
+      isActive: true,
     },
-  ]
+  });
 
-  for (const plan of plans) {
-    await prisma.plan.upsert({
-      where: { tier: plan.tier },
-      update: plan,
-      create: plan,
-    })
-  }
+  console.log('Created plans:', {
+    starter: starterPlan.name,
+    pro: proPlan.name,
+    creator: creatorPlan.name,
+  });
 
-  console.log(`Seeded ${plans.length} plans.`)
+  console.log('Seed completed successfully!');
+  console.log('\nPlans created:');
+  console.log(`- ${starterPlan.name}: $${starterPlan.price}/month - ${starterPlan.generationsPerMonth} generations`);
+  console.log(`- ${proPlan.name}: $${proPlan.price}/month - ${proPlan.generationsPerMonth} generations`);
+  console.log(`- ${creatorPlan.name}: $${creatorPlan.price}/month - ${creatorPlan.generationsPerMonth} generations`);
 }
 
 main()
-  .then(async () => {
-    await prisma.$disconnect()
+  .catch((e) => {
+    console.error('Seed error:', e);
+    process.exit(1);
   })
-  .catch(async (e) => {
-    console.error(e)
-    await prisma.$disconnect()
-    process.exit(1)
-  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
