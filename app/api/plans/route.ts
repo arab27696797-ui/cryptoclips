@@ -36,7 +36,14 @@ export async function GET() {
       return a.priceMonthly - b.priceMonthly;
     });
 
-    return NextResponse.json({ plans: sortedPlans });
+    return NextResponse.json(
+      { plans: sortedPlans },
+      {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
   } catch (error) {
     console.error("Plans GET error:", error);
 
