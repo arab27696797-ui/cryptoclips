@@ -1,259 +1,135 @@
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+import { AIProvider, GenerateScriptParams, GenerateScriptResult } from './provider';
+
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-const PRIMARY_MODEL = process.env.OPENROUTER_PRIMARY_MODEL || 'openai/gpt-4.1';
-const FALLBACK_MODEL = process.env.OPENROUTER_FALLBACK_MODEL || 'anthropic/claude-3.7-sonnet';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
-if (!OPENROUTER_API_KEY) {
-  console.warn('OPENROUTER_API_KEY is not set. AI features will not work.');
-}
+// CHEAP CHINESE MODELS FOR PROFITABILITY
+const OPENROUTER_PRIMARY_MODEL = process.env.OPENROUTER_PRIMARY_MODEL || 'deepseek/deepseek-chat';
+const OPENROUTER_FALLBACK_MODEL = process.env.OPENROUTER_FALLBACK_MODEL || 'qwen/qwen-2.5-72b-instruct';
 
-export interface ScriptGenerationOptions {
-  source: string;
-  sourceType: 'url' | 'text' | 'tweet';
-  duration: number;
-  angle: 'neutral' | 'bullish' | 'bearish';
-  style?: string;
-}
+export class OpenRouterProvider implements AIProvider {
+  async generateScript(params: GenerateScriptParams): Promise<GenerateScriptResult> {
+    if (!OPENROUTER_API_KEY) {
+      throw new Error('OpenRouter API key not configured');
+    }
 
-export interface GeneratedScript {
-  hook: string;
-  body: string;
-  cta: string;
-  fullText: string;
-  wordCount: number;
-}
+    const systemPrompt = this.buildSystemPrompt(params);
+    const userPrompt = this.buildUserPrompt(params);
 
-async function callOpenRouter(
-  messages: Array<{ role: string; content: string }>,
-  useFallback: boolean = false
-): Promise<string> {
-  const model = useFallback ? FALLBACK_MODEL : PRIMARY_MODEL;
-
-  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
-      'X-Title': 'CryptoClips',
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.7,
-      max_tokens: 1200,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(
-      `OpenRouter API error (${model}): ${response.status} ${response.statusText}${
-        error.error ? ` - ${JSON.stringify(error.error)}` : ''
-      }`
-    );
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('No content returned from OpenRouter API');
-  }
-
-  return content;
-}
-
-export async function generateScript(
-  options: ScriptGenerationOptions
-): Promise<GeneratedScript> {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('OpenRouter API key is not configured. Please set OPENROUTER_API_KEY environment variable.');
-  }
-
-  const { source, sourceType, duration, angle, style } = options;
-
-  // Calculate approximate word count target (2.5 words per second is conversational pace)
-  const targetWords = Math.floor(duration * 2.5);
-
-  const systemPrompt = `You are an expert crypto content editor specializing in short-form video scripts for YouTube Shorts, TikTok, Instagram Reels, and Twitter.
-
-Your job: Transform crypto news, articles, tweets, or raw information into punchy, high-retention video scripts.
-
-CRITICAL RULES:
-- Target: ${duration} seconds (~${targetWords} words total)
-- Angle: ${angle === 'neutral' ? 'Balanced, factual, news-focused' : angle === 'bullish' ? 'Optimistic, opportunity-focused, growth angle' : 'Cautious, risk-aware, analytical angle'}
-- Style: ${style || 'Professional yet conversational, energetic, confident'}
-- NO generic AI fluff
-- NO invented data, prices, or dates
-- NO financial promises or guarantees
-- Keep it punchy and social-media native
-
-STRUCTURE:
-1. Hook (1-2 sentences) - Grab attention immediately
-2. Main Point (2-3 sentences) - Core news/claim
-3. Why It Matters (1-2 sentences) - Market relevance
-4. Context (1-2 sentences) - Brief background if needed
-5. CTA (1 sentence) - Clear next step
-
-OUTPUT FORMAT:
-Hook: [attention-grabbing opening]
-Body: [main point + why it matters + context]
-CTA: [call to action]
-
-Remember: You're a crypto content editor, not a generic AI assistant. Be direct, energetic, and market-aware.`;
-
-  const userPrompt = `Source Type: ${sourceType}
-Duration Target: ${duration} seconds
-Angle: ${angle}
-
-Source Content:
-${source}
-
-Create a ${duration}-second video script optimized for crypto social media. Be specific, punchy, and retention-focused.`;
-
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt },
-  ];
-
-  try {
-    // Try primary model (GPT-4.1)
-    const content = await callOpenRouter(messages, false);
-    return parseScript(content);
-  } catch (primaryError) {
-    console.error('Primary model (GPT-4.1) failed, trying fallback (Claude 3.7 Sonnet):', primaryError);
-
+    // Try primary model first (DeepSeek)
     try {
-      // Fallback to Claude 3.7 Sonnet
-      const content = await callOpenRouter(messages, true);
-      return parseScript(content);
-    } catch (fallbackError) {
-      console.error('Fallback model also failed:', fallbackError);
-      throw new Error(`Script generation failed: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown error'}`);
+      return await this.callModel(OPENROUTER_PRIMARY_MODEL, systemPrompt, userPrompt);
+    } catch (primaryError) {
+      console.error('Primary model (DeepSeek) failed, falling back to Qwen:', primaryError);
+      
+      // Fallback to Qwen
+      try {
+        return await this.callModel(OPENROUTER_FALLBACK_MODEL, systemPrompt, userPrompt);
+      } catch (fallbackError) {
+        console.error('Fallback model (Qwen) also failed:', fallbackError);
+        throw new Error('Both AI models failed. Please try again later.');
+      }
     }
   }
-}
 
-function parseScript(content: string): GeneratedScript {
-  const lines = content.split('\n').filter(line => line.trim());
-  
-  let hook = '';
-  let body = '';
-  let cta = '';
+  private async callModel(model: string, systemPrompt: string, userPrompt: string): Promise<GenerateScriptResult> {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'https://cryptoclips.com',
+        'X-Title': 'CryptoClips',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 1000,
+      }),
+    });
 
-  let currentSection = '';
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`OpenRouter API error (${model}): ${response.status} ${JSON.stringify(errorData)}`);
+    }
 
-  for (const line of lines) {
-    const lowerLine = line.toLowerCase();
+    const data = await response.json();
+    const scriptText = data.choices?.[0]?.message?.content;
+
+    if (!scriptText) {
+      throw new Error('No script generated from AI model');
+    }
+
+    return {
+      script: scriptText.trim(),
+      model,
+      tokensUsed: data.usage?.total_tokens || 0,
+    };
+  }
+
+  private buildSystemPrompt(params: GenerateScriptParams): string {
+    return `You are an expert crypto content creator specializing in short-form video scripts for social media (TikTok, YouTube Shorts, Instagram Reels).
+
+Your task is to transform crypto news, tweets, or articles into punchy, engaging video scripts optimized for maximum retention and virality.
+
+Script Requirements:
+- Duration: ${params.duration || 30}-60 seconds when read aloud
+- Tone: ${params.angle || 'neutral'} (bullish, bearish, or neutral)
+- Style: Fast-paced, hook-driven, social media optimized
+- Target audience: Crypto traders, investors, enthusiasts
+
+Structure:
+1. HOOK (first 3 seconds): Attention-grabbing opener
+2. CONTEXT: Quick background (if needed)
+3. MAIN POINT: Core message or news
+4. INSIGHT: Analysis or implication
+5. CTA: Call to action (like, follow, comment)
+
+Writing Style:
+- Short sentences (5-10 words max)
+- Conversational tone
+- Use numbers and specific data
+- Avoid jargon unless necessary
+- Include strategic pauses
+- Build momentum toward key point
+
+Output only the script text, no additional formatting or metadata.`;
+  }
+
+  private buildUserPrompt(params: GenerateScriptParams): string {
+    return `Source content:
+${params.content}
+
+Generate a ${params.duration || 30}-60 second video script with a ${params.angle || 'neutral'} perspective on this crypto news/content.
+
+Make it punchy, engaging, and optimized for social media virality.`;
+  }
+
+  async refineScript(originalScript: string, feedback: string): Promise<GenerateScriptResult> {
+    if (!OPENROUTER_API_KEY) {
+      throw new Error('OpenRouter API key not configured');
+    }
+
+    const systemPrompt = `You are an expert crypto video script editor. Refine scripts based on user feedback while maintaining the core message and social media optimization.`;
     
-    if (lowerLine.includes('hook:') || lowerLine.startsWith('hook')) {
-      currentSection = 'hook';
-      const cleaned = line.replace(/hook:?/gi, '').trim();
-      if (cleaned) hook = cleaned;
-      continue;
-    }
-    
-    if (lowerLine.includes('body:') || lowerLine.startsWith('body') || lowerLine.includes('main point:')) {
-      currentSection = 'body';
-      const cleaned = line.replace(/(body|main point):?/gi, '').trim();
-      if (cleaned) body = cleaned;
-      continue;
-    }
-    
-    if (lowerLine.includes('cta:') || lowerLine.includes('call to action:') || lowerLine.startsWith('cta')) {
-      currentSection = 'cta';
-      const cleaned = line.replace(/(cta|call to action):?/gi, '').trim();
-      if (cleaned) cta = cleaned;
-      continue;
-    }
+    const userPrompt = `Original script:
+${originalScript}
 
-    // Append to current section
-    const trimmedLine = line.trim();
-    if (currentSection === 'hook') {
-      hook = hook ? `${hook} ${trimmedLine}` : trimmedLine;
-    } else if (currentSection === 'body') {
-      body = body ? `${body} ${trimmedLine}` : trimmedLine;
-    } else if (currentSection === 'cta') {
-      cta = cta ? `${cta} ${trimmedLine}` : trimmedLine;
-    } else if (!currentSection && trimmedLine) {
-      // If no section detected yet, treat as body
-      body = body ? `${body} ${trimmedLine}` : trimmedLine;
-    }
-  }
-
-  // Fallback parsing if sections not clearly marked
-  if (!hook && !cta && body) {
-    const sentences = body.split(/[.!?]+/).filter(s => s.trim());
-    if (sentences.length >= 3) {
-      hook = sentences[0].trim() + '.';
-      cta = sentences[sentences.length - 1].trim() + '.';
-      body = sentences.slice(1, -1).join('. ').trim() + '.';
-    } else if (sentences.length === 2) {
-      hook = sentences[0].trim() + '.';
-      body = sentences[1].trim() + '.';
-      cta = 'Follow for more crypto updates.';
-    } else if (sentences.length === 1) {
-      body = content.trim();
-      hook = 'Breaking crypto news.';
-      cta = 'Stay tuned for updates.';
-    }
-  }
-
-  // Ensure we have all required parts
-  if (!hook) hook = 'Crypto market update.';
-  if (!body) body = content.trim() || 'No content generated.';
-  if (!cta) cta = 'Follow for more insights.';
-
-  const fullText = `${hook} ${body} ${cta}`.trim();
-  const wordCount = fullText.split(/\s+/).length;
-
-  return {
-    hook,
-    body,
-    cta,
-    fullText,
-    wordCount,
-  };
-}
-
-export async function refineScript(
-  currentScript: string,
-  feedback: string
-): Promise<GeneratedScript> {
-  if (!OPENROUTER_API_KEY) {
-    throw new Error('OpenRouter API key is not configured');
-  }
-
-  const systemPrompt = `You are an expert crypto content editor. Refine the video script based on user feedback while maintaining the hook-body-cta structure.
-
-Keep it punchy, social-media native, and high-retention. No generic AI fluff.`;
-
-  const userPrompt = `Current Script:
-${currentScript}
-
-User Feedback:
+User feedback:
 ${feedback}
 
-Refine the script based on the feedback. Maintain the same structure: Hook, Body, CTA.`;
+Please refine the script based on this feedback. Keep it punchy and social media optimized.`;
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt },
-  ];
-
-  try {
-    const content = await callOpenRouter(messages, false);
-    return parseScript(content);
-  } catch (primaryError) {
-    console.error('Primary model failed during refinement, trying fallback:', primaryError);
-    
+    // Try primary model first
     try {
-      const content = await callOpenRouter(messages, true);
-      return parseScript(content);
-    } catch (fallbackError) {
-      console.error('Fallback model also failed during refinement:', fallbackError);
-      throw new Error(`Script refinement failed: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown error'}`);
+      return await this.callModel(OPENROUTER_PRIMARY_MODEL, systemPrompt, userPrompt);
+    } catch (primaryError) {
+      console.error('Primary model failed during refinement, using fallback:', primaryError);
+      return await this.callModel(OPENROUTER_FALLBACK_MODEL, systemPrompt, userPrompt);
     }
   }
 }
