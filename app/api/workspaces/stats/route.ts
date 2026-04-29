@@ -1,82 +1,71 @@
-import { NextResponse } from "next/server";
-import { requireAuth, getUserWorkspace } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
+import { requireAuth, requireWorkspace } from '@/lib/auth/session';
+import { getUsageStats } from '@/lib/billing/quota';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await requireAuth();
-    const workspace = await getUserWorkspace(session.sub);
+    const workspace = await requireWorkspace();
 
-    if (!workspace) {
-      return NextResponse.json(
-        { error: "No workspace found" },
-        { status: 404 }
-      );
-    }
+    // Get counts
+    const [projectCount, renderCount, brandPresetCount] = await Promise.all([
+      prisma.project.count({
+        where: { workspaceId: workspace.id },
+      }),
+      prisma.renderJob.count({
+        where: {
+          project: {
+            workspaceId: workspace.id,
+          },
+        },
+      }),
+      prisma.brandPreset.count({
+        where: { workspaceId: workspace.id },
+      }),
+    ]);
 
-    const subscription = await prisma.subscription.findUnique({
+    // Get recent renders
+    const recentRenders = await prisma.renderJob.findMany({
       where: {
-        workspaceId: workspace.id,
+        project: {
+          workspaceId: workspace.id,
+        },
       },
       include: {
-        plan: true,
+        project: {
+          select: {
+            name: true,
+          },
+        },
       },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 5,
     });
 
-    const presetsCount = await prisma.brandPreset.count({
-      where: {
-        workspaceId: workspace.id,
-      },
-    });
-
-    const videosUsedThisMonth = workspace.videosUsedThisMonth ?? 0;
-    const generationsQuota = subscription?.generationsQuota ?? 0;
-    const generationsUsed = subscription?.generationsUsed ?? 0;
+    // Get usage stats
+    const usageStats = await getUsageStats(workspace.id);
 
     return NextResponse.json({
-      workspace: {
-        id: workspace.id,
-        name: workspace.name,
-        slug: workspace.slug,
+      stats: {
+        projects: projectCount,
+        renders: renderCount,
+        brandPresets: brandPresetCount,
       },
-      plan: subscription?.plan
-        ? {
-            tier: subscription.plan.tier,
-            name: subscription.plan.name,
-            generationsPerMonth: subscription.plan.generationsPerMonth,
-            maxVideoLength: subscription.plan.maxVideoLength,
-          }
-        : null,
-      usage: {
-        videosUsedThisMonth,
-        generationsQuota,
-        generationsUsed,
-        generationsRemaining: Math.max(0, generationsQuota - generationsUsed),
-        presetsCount,
-      },
-      subscription: subscription
-        ? {
-            status: subscription.status,
-            autoRenew: subscription.autoRenew,
-            canceledAt: subscription.canceledAt?.toISOString() ?? null,
-            currentPeriodStart:
-              subscription.currentPeriodStart?.toISOString() ?? null,
-            currentPeriodEnd:
-              subscription.currentPeriodEnd?.toISOString() ?? null,
-            generationsQuota: subscription.generationsQuota,
-            generationsUsed: subscription.generationsUsed,
-          }
-        : null,
+      usage: usageStats,
+      recentRenders,
     });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    console.error('Get workspace stats error:', error);
+
+    if (error instanceof Error && error.message === 'Authentication required') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    console.error("Workspace Stats GET error:", error);
-
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: 'Failed to fetch workspace stats' },
       { status: 500 }
     );
   }
