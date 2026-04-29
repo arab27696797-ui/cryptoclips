@@ -1,126 +1,228 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { requireAuth, requireWorkspace } from '@/lib/auth/session';
-import { checkQuota, incrementUsage } from '@/lib/billing/quota';
+import { getUserFromRequest } from '@/lib/auth/session';
+import { prisma } from '@/lib/db/prisma';
+import { checkQuota } from '@/lib/billing/quota';
+import { renderVideo } from '@/lib/render/video-render';
+import { generateSpeech } from '@/lib/tts/edge-tts';
+import * as path from 'path';
+import * as fs from 'fs';
 
+/**
+ * POST /api/renders/start
+ * Start video rendering
+ */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAuth();
-    const workspace = await requireWorkspace();
-    const body = await request.json();
-
-    const { projectId, scriptVersionId, template, voice, brandPresetId } = body;
-
-    // Validation
-    if (!projectId || !scriptVersionId) {
-      return NextResponse.json(
-        { error: 'Project ID and script version ID are required' },
-        { status: 400 }
-      );
+    const user = await getUserFromRequest(request);
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if project exists and belongs to workspace
-    const project = await prisma.project.findFirst({
-      where: {
-        id: projectId,
-        workspaceId: workspace.id,
-      },
+    const body = await request.json();
+    const {
+      scriptVersionId,
+      templateStyle,
+      sentiment,
+      voiceId,
+      brandPresetId,
+    } = body;
+
+    // Get script version
+    const scriptVersion = await prisma.scriptVersion.findUnique({
+      where: { id: scriptVersionId },
       include: {
-        scriptVersions: {
-          where: { id: scriptVersionId },
+        project: {
+          include: {
+            workspace: true,
+          },
         },
       },
     });
 
-    if (!project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      );
+    if (!scriptVersion) {
+      return NextResponse.json({ error: 'Script not found' }, { status: 404 });
     }
 
-    if (project.scriptVersions.length === 0) {
-      return NextResponse.json(
-        { error: 'Script version not found' },
-        { status: 404 }
-      );
+    // Verify ownership
+    if (scriptVersion.project.workspace.userId !== user.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-
-    const scriptVersion = project.scriptVersions[0];
 
     // Check quota
-    const hasQuota = await checkQuota(workspace.id);
-
-    if (!hasQuota) {
+    const canGenerate = await checkQuota(user.id);
+    if (!canGenerate) {
       return NextResponse.json(
-        { 
-          error: 'Generation limit reached',
-          details: 'You have reached your monthly generation limit. Please upgrade your plan or wait for the next billing cycle.',
+        {
+          error: 'Generation quota exceeded',
+          message: 'You have reached your monthly generation limit. Please upgrade your plan.',
         },
         { status: 403 }
       );
     }
 
-    // Get brand preset if provided
+    // Get brand preset if specified
     let brandPreset = null;
     if (brandPresetId) {
-      brandPreset = await prisma.brandPreset.findFirst({
-        where: {
-          id: brandPresetId,
-          workspaceId: workspace.id,
-        },
+      brandPreset = await prisma.brandPreset.findUnique({
+        where: { id: brandPresetId },
       });
-
-      if (!brandPreset) {
-        return NextResponse.json(
-          { error: 'Brand preset not found' },
-          { status: 404 }
-        );
-      }
     }
 
     // Create render job
     const renderJob = await prisma.renderJob.create({
       data: {
-        projectId,
         scriptVersionId,
-        status: 'queued',
-        template: template || 'clean-news',
-        voice: voice || 'en-US-GuyNeural',
+        status: 'QUEUED',
+        templateStyle: templateStyle || 'crypto_matrix',
+        voiceId: voiceId || 'en-US-GuyNeural',
         brandPresetId: brandPresetId || null,
-        config: {
-          template: template || 'clean-news',
-          voice: voice || 'en-US-GuyNeural',
-          brandColors: brandPreset ? {
-            primary: brandPreset.primaryColor,
-            secondary: brandPreset.secondaryColor,
-            background: brandPreset.backgroundColor,
-          } : undefined,
+      },
+    });
+
+    // Start rendering (async)
+    processRenderJob(renderJob.id, scriptVersion.content, {
+      templateStyle: templateStyle || 'crypto_matrix',
+      sentiment: sentiment || 'neutral',
+      voiceId: voiceId || 'en-US-GuyNeural',
+      brandPreset: brandPreset
+        ? {
+            primaryColor: brandPreset.primaryColor,
+            secondaryColor: brandPreset.secondaryColor,
+            fontFamily: brandPreset.fontFamily,
+            logoPath: brandPreset.logoUrl || undefined,
+          }
+        : undefined,
+    }).catch((error) => {
+      console.error('Render job failed:', error);
+      prisma.renderJob
+        .update({
+          where: { id: renderJob.id },
+          data: {
+            status: 'FAILED',
+            errorMessage: error.message,
+          },
+        })
+        .catch(console.error);
+    });
+
+    return NextResponse.json({
+      renderJob: {
+        id: renderJob.id,
+        status: renderJob.status,
+        createdAt: renderJob.createdAt,
+      },
+    });
+  } catch (error: any) {
+    console.error('Render start error:', error);
+    return NextResponse.json(
+      { error: 'Failed to start render', details: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * Process render job
+ */
+async function processRenderJob(
+  renderJobId: string,
+  scriptText: string,
+  options: {
+    templateStyle: string;
+    sentiment: string;
+    voiceId: string;
+    brandPreset?: any;
+  }
+) {
+  try {
+    // Update status
+    await prisma.renderJob.update({
+      where: { id: renderJobId },
+      data: { status: 'PROCESSING', startedAt: new Date() },
+    });
+
+    // Generate audio
+    console.log('Generating speech...');
+    const audioDir = path.join(process.cwd(), 'temp', 'audio');
+    if (!fs.existsSync(audioDir)) {
+      fs.mkdirSync(audioDir, { recursive: true });
+    }
+
+    const audioPath = path.join(audioDir, `${renderJobId}.mp3`);
+    await generateSpeech(scriptText, options.voiceId, audioPath);
+
+    // Render video
+    console.log('Rendering video...');
+    const videoDir = path.join(process.cwd(), 'public', 'renders');
+    if (!fs.existsSync(videoDir)) {
+      fs.mkdirSync(videoDir, { recursive: true });
+    }
+
+    const videoPath = path.join(videoDir, `${renderJobId}.mp4`);
+
+    await renderVideo({
+      scriptText,
+      audioPath,
+      templateStyle: options.templateStyle as any,
+      sentiment: options.sentiment as any,
+      brandPreset: options.brandPreset,
+      outputPath: videoPath,
+    });
+
+    // Cleanup audio
+    fs.unlinkSync(audioPath);
+
+    // Get video file size
+    const stats = fs.statSync(videoPath);
+    const fileSizeInBytes = stats.size;
+
+    // Update render job
+    await prisma.renderJob.update({
+      where: { id: renderJobId },
+      data: {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        outputUrl: `/renders/${renderJobId}.mp4`,
+        fileSize: fileSizeInBytes,
+      },
+    });
+
+    // Decrement quota
+    const renderJob = await prisma.renderJob.findUnique({
+      where: { id: renderJobId },
+      include: {
+        scriptVersion: {
+          include: {
+            project: {
+              include: {
+                workspace: {
+                  include: {
+                    subscription: true,
+                  },
+                },
+              },
+            },
+          },
         },
       },
     });
 
-    // Increment usage counter
-    await incrementUsage(workspace.id);
-
-    // TODO: Queue the render job for processing
-    // In production, this would go to a background job queue (BullMQ, etc.)
-    // For now, we'll just mark it as queued
-
-    return NextResponse.json({
-      renderJob,
-      message: 'Render started successfully',
-    }, { status: 201 });
-  } catch (error) {
-    console.error('Start render error:', error);
-
-    if (error instanceof Error && error.message === 'Authentication required') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (renderJob?.scriptVersion.project.workspace.subscription) {
+      await prisma.subscription.update({
+        where: {
+          id: renderJob.scriptVersion.project.workspace.subscription.id,
+        },
+        data: {
+          generationsUsed: {
+            increment: 1,
+          },
+        },
+      });
     }
 
-    return NextResponse.json(
-      { error: 'Failed to start render' },
-      { status: 500 }
-    );
+    console.log(`Render completed: ${renderJobId}`);
+  } catch (error: any) {
+    console.error('Render processing error:', error);
+    throw error;
   }
 }
