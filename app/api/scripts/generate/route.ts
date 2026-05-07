@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAuth, requireWorkspace } from '@/lib/auth/session';
+import { requireAuth, getUserWorkspace } from '@/lib/auth';
 import { generateScript } from '@/lib/ai/openrouter';
 
 export async function POST(request: NextRequest) {
   try {
     const session = await requireAuth();
-    const workspace = await requireWorkspace();
+    const workspace = await getUserWorkspace(session.sub);
     const body = await request.json();
 
     const { projectId, source, sourceType, duration, angle, style } = body;
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     const project = await prisma.project.findFirst({
       where: {
         id: projectId,
-        workspaceId: workspace.id,
+        workspaceId: workspace?.id,
       },
     });
 
@@ -64,8 +64,7 @@ export async function POST(request: NextRequest) {
 
     // Generate script using OpenRouter
     const scriptData = await generateScript({
-      source,
-      sourceType,
+      content: source,
       duration,
       angle,
       style,
@@ -74,34 +73,38 @@ export async function POST(request: NextRequest) {
     // Get current version number
     const latestVersion = await prisma.scriptVersion.findFirst({
       where: { projectId },
-      orderBy: { version: 'desc' },
-      select: { version: true },
+      orderBy: { versionNumber: 'desc' },
+      select: { versionNumber: true },
     });
 
-    const newVersion = (latestVersion?.version || 0) + 1;
+    const newVersion = (latestVersion?.versionNumber || 0) + 1;
+
+    // Parse script data
+    const hook = scriptData.hook || 'Crypto update';
+    const cta = scriptData.cta || 'Follow for more crypto updates';
+    const scenes = scriptData.scenes || [{ text: scriptData.script, duration }];
 
     // Save script version
     const scriptVersion = await prisma.scriptVersion.create({
       data: {
         projectId,
-        version: newVersion,
-        hook: scriptData.hook,
-        body: scriptData.body,
-        cta: scriptData.cta,
-        fullText: scriptData.fullText,
-        wordCount: scriptData.wordCount,
-        duration,
+        versionNumber: newVersion,
+        hook,
+        cta,
+        scenes: JSON.stringify(scenes),
+        totalDuration: duration,
         angle,
-        style: style || null,
+        isActive: true,
       },
     });
 
-    // Update project
-    await prisma.project.update({
-      where: { id: projectId },
-      data: {
-        currentScriptVersionId: scriptVersion.id,
+    // Deactivate old versions
+    await prisma.scriptVersion.updateMany({
+      where: {
+        projectId,
+        id: { not: scriptVersion.id },
       },
+      data: { isActive: false },
     });
 
     return NextResponse.json({
@@ -111,7 +114,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Generate script error:', error);
 
-    if (error instanceof Error && error.message === 'Authentication required') {
+    if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
