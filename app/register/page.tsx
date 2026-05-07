@@ -51,7 +51,7 @@ export default function RegisterPage() {
       const data = await res.json();
 
       if (res.ok) {
-        router.push('/dashboard');
+        router.push('/pricing');
       } else {
         setError(data.error || 'Registration failed');
       }
@@ -96,7 +96,7 @@ export default function RegisterPage() {
                   id="name"
                   placeholder="Your name"
                   value={formData.name}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
                 />
@@ -109,7 +109,7 @@ export default function RegisterPage() {
                   type="email"
                   placeholder="you@example.com"
                   value={formData.email}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, email: e.target.value })
                   }
                   required
@@ -123,7 +123,7 @@ export default function RegisterPage() {
                   type="password"
                   placeholder="At least 8 characters"
                   value={formData.password}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, password: e.target.value })
                   }
                   required
@@ -136,7 +136,7 @@ export default function RegisterPage() {
                   id="confirmPassword"
                   type="password"
                   value={formData.confirmPassword}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, confirmPassword: e.target.value })
                   }
                   required
@@ -166,10 +166,10 @@ export default function RegisterPage() {
 
         <div className="rounded-lg bg-orange-50 p-4 text-center">
           <p className="text-sm font-medium text-orange-900">
-            🎉 Start with a 7-day free trial
+            💳 Choose your plan after registration
           </p>
           <p className="mt-1 text-xs text-orange-700">
-            15 generations included. No credit card required.
+            No free trial. Select a paid plan to start creating.
           </p>
         </div>
       </div>
