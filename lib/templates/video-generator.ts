@@ -53,7 +53,7 @@ export async function generateVideoTemplate(
     const ctx = canvas.getContext('2d');
 
     // Render frame
-    renderTemplate(ctx, config, frame);
+    renderTemplate(ctx as any, config, frame);
 
     // Save frame as image
     const framePath = path.join(tempDir, `frame_${String(frame).padStart(5, '0')}.png`);
