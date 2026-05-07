@@ -79,7 +79,7 @@ export default function LoginPage() {
                   type="email"
                   placeholder="you@example.com"
                   value={formData.email}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, email: e.target.value })
                   }
                   required
@@ -92,7 +92,7 @@ export default function LoginPage() {
                   id="password"
                   type="password"
                   value={formData.password}
-                  onChange={(e) =>
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({ ...formData, password: e.target.value })
                   }
                   required
