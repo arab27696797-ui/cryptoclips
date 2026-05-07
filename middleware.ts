@@ -13,16 +13,20 @@ function getSecret() {
 }
 
 export async function middleware(request: NextRequest) {
-  const session = request.cookies.get('session')?.value
+  const session = request.cookies.get('cryptoclips_session')?.value
 
   const isAuthPage =
+    request.nextUrl.pathname === '/login' ||
+    request.nextUrl.pathname === '/register' ||
     request.nextUrl.pathname === '/sign-in' ||
     request.nextUrl.pathname === '/sign-up'
 
+  const isPricingPage = request.nextUrl.pathname === '/pricing'
   const isApiAuth = request.nextUrl.pathname.startsWith('/api/auth')
   const isApiPublic = request.nextUrl.pathname === '/api/plans'
+  const isWebhook = request.nextUrl.pathname.startsWith('/api/webhooks')
 
-  if (isApiAuth || isApiPublic) {
+  if (isApiAuth || isApiPublic || isWebhook) {
     return NextResponse.next()
   }
 
@@ -44,29 +48,38 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/api/templates') ||
     request.nextUrl.pathname.startsWith('/api/renders') ||
     request.nextUrl.pathname.startsWith('/api/upload') ||
-    request.nextUrl.pathname.startsWith('/api/webhooks') ||
-    request.nextUrl.pathname.startsWith('/api/billing')
+    request.nextUrl.pathname.startsWith('/api/billing') ||
+    request.nextUrl.pathname.startsWith('/api/scripts')
 
-  if (isProtected) {
+  if (isProtected || isPricingPage) {
     if (!session) {
       if (request.nextUrl.pathname.startsWith('/api')) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       }
 
-      return NextResponse.redirect(new URL('/sign-in', request.url))
+      return NextResponse.redirect(new URL('/login', request.url))
     }
 
     try {
-      await jwtVerify(session, getSecret(), { clockTolerance: 60 })
+      const verified = await jwtVerify(session, getSecret(), { clockTolerance: 60 })
+      const payload = verified.payload
+
+      if (isProtected && !isPricingPage) {
+        const workspaceId = payload.workspaceId as string | undefined
+        if (!workspaceId) {
+          return NextResponse.redirect(new URL('/pricing', request.url))
+        }
+      }
+
       return NextResponse.next()
     } catch {
       const response = isAuthPage
         ? NextResponse.next()
         : request.nextUrl.pathname.startsWith('/api')
           ? NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-          : NextResponse.redirect(new URL('/sign-in', request.url))
+          : NextResponse.redirect(new URL('/login', request.url))
 
-      response.cookies.set('session', '', { maxAge: 0, path: '/' })
+      response.cookies.set('cryptoclips_session', '', { maxAge: 0, path: '/' })
       return response
     }
   }
