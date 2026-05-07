@@ -75,7 +75,7 @@ class StubTTSProvider implements TTSProvider {
 }
 
 export function createTTSProvider(): TTSProvider {
-  const enabled = process.env.EDGETTSENABLED === 'true'
+  const enabled = process.env.EDGETTS_ENABLED !== 'false'
 
   if (enabled) {
     return new EdgeTTSProvider()
