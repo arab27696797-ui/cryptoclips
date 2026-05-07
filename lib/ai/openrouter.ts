@@ -1,7 +1,26 @@
-import { AIProvider, GenerateScriptParams, GenerateScriptResult } from './provider';
+export interface GenerateScriptParams {
+  content: string
+  duration?: number
+  angle?: string
+  style?: string
+}
+
+export interface GenerateScriptResult {
+  script: string
+  hook: string
+  cta: string
+  scenes: Array<{ text: string; duration: number; visualHint?: string }>
+  model: string
+  tokensUsed: number
+}
+
+export interface AIProvider {
+  generateScript(params: GenerateScriptParams): Promise<GenerateScriptResult>
+  refineScript(originalScript: string, feedback: string): Promise<GenerateScriptResult>
+}
 
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_API_KEY = proces…KEY;
 
 // CHEAP CHINESE MODELS FOR PROFITABILITY
 const OPENROUTER_PRIMARY_MODEL = process.env.OPENROUTER_PRIMARY_MODEL || 'deepseek/deepseek-chat';
@@ -18,13 +37,13 @@ export class OpenRouterProvider implements AIProvider {
 
     // Try primary model first (DeepSeek)
     try {
-      return await this.callModel(OPENROUTER_PRIMARY_MODEL, systemPrompt, userPrompt);
+      return await this.callModel(OPENROUTER_PRIMARY_MODEL, systemPrompt, userPrompt, params);
     } catch (primaryError) {
       console.error('Primary model (DeepSeek) failed, falling back to Qwen:', primaryError);
-      
+    
       // Fallback to Qwen
       try {
-        return await this.callModel(OPENROUTER_FALLBACK_MODEL, systemPrompt, userPrompt);
+        return await this.callModel(OPENROUTER_FALLBACK_MODEL, systemPrompt, userPrompt, params);
       } catch (fallbackError) {
         console.error('Fallback model (Qwen) also failed:', fallbackError);
         throw new Error('Both AI models failed. Please try again later.');
@@ -32,7 +51,12 @@ export class OpenRouterProvider implements AIProvider {
     }
   }
 
-  private async callModel(model: string, systemPrompt: string, userPrompt: string): Promise<GenerateScriptResult> {
+  private async callModel(
+    model: string,
+    systemPrompt: string,
+    userPrompt: string,
+    params: GenerateScriptParams
+  ): Promise<GenerateScriptResult> {
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -64,8 +88,25 @@ export class OpenRouterProvider implements AIProvider {
       throw new Error('No script generated from AI model');
     }
 
+    // Parse script into structured format
+    const lines = scriptText.trim().split('\n').filter((l: string) => l.trim());
+    const hook = lines[0] || 'Crypto update';
+    const cta = lines[lines.length - 1] || 'Follow for more crypto updates';
+    const bodyLines = lines.slice(1, -1);
+
+    const scenes = bodyLines.length > 0
+      ? bodyLines.map((text: string, i: number) => ({
+          text: text.replace(/^\d+\.\s*/, '').trim(),
+          duration: Math.max(3, Math.floor((params.duration || 30) / bodyLines.length)),
+          visualHint: 'crypto chart',
+        }))
+      : [{ text: scriptText.trim(), duration: params.duration || 30, visualHint: 'crypto chart' }];
+
     return {
       script: scriptText.trim(),
+      hook,
+      cta,
+      scenes,
       model,
       tokensUsed: data.usage?.total_tokens || 0,
     };
@@ -115,7 +156,7 @@ Make it punchy, engaging, and optimized for social media virality.`;
     }
 
     const systemPrompt = `You are an expert crypto video script editor. Refine scripts based on user feedback while maintaining the core message and social media optimization.`;
-    
+  
     const userPrompt = `Original script:
 ${originalScript}
 
@@ -126,10 +167,20 @@ Please refine the script based on this feedback. Keep it punchy and social media
 
     // Try primary model first
     try {
-      return await this.callModel(OPENROUTER_PRIMARY_MODEL, systemPrompt, userPrompt);
+      return await this.callModel(OPENROUTER_PRIMARY_MODEL, systemPrompt, userPrompt, { content: originalScript });
     } catch (primaryError) {
       console.error('Primary model failed during refinement, using fallback:', primaryError);
-      return await this.callModel(OPENROUTER_FALLBACK_MODEL, systemPrompt, userPrompt);
+      return await this.callModel(OPENROUTER_FALLBACK_MODEL, systemPrompt, userPrompt, { content: originalScript });
     }
   }
+}
+
+export async function generateScript(params: GenerateScriptParams): Promise<GenerateScriptResult> {
+  const provider = new OpenRouterProvider();
+  return provider.generateScript(params);
+}
+
+export async function refineScript(originalScript: string, feedback: string): Promise<GenerateScriptResult> {
+  const provider = new OpenRouterProvider();
+  return provider.refineScript(originalScript, feedback);
 }
