@@ -69,30 +69,111 @@ class MockBillingProvider implements BillingProvider {
 class TributeBillingProvider implements BillingProvider {
   private apiKey: string
   private webhookSecret: string
+  private baseUrl = 'https://api.tribute.com/v1'
 
   constructor(apiKey: string, webhookSecret: string) {
     this.apiKey = apiKey
     this.webhookSecret = webhookSecret
   }
 
-  async createCheckout(_params: CreateCheckoutParams): Promise<CreateCheckoutResult> {
-    return {
-      success: false,
-      error: 'Tribute integration not yet implemented',
+  async createCheckout(params: CreateCheckoutParams): Promise<CreateCheckoutResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/checkout/sessions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          plan_id: params.planId,
+          workspace_id: params.workspaceId,
+          billing_email: params.billingEmail,
+          success_url: params.successUrl,
+          cancel_url: params.cancelUrl,
+          metadata: {
+            workspaceId: params.workspaceId,
+            planId: params.planId,
+          },
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Tribute API error: ${response.status} ${error}`)
+      }
+
+      const data = await response.json()
+
+      return {
+        success: true,
+        checkoutUrl: data.checkout_url,
+        paymentId: data.payment_id || data.id,
+      }
+    } catch (error) {
+      console.error('Tribute checkout error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Tribute checkout failed',
+      }
     }
   }
 
-  async confirmPayment(_params: ConfirmPaymentParams): Promise<ConfirmPaymentResult> {
-    return {
-      success: false,
-      error: 'Tribute integration not yet implemented',
+  async confirmPayment(params: ConfirmPaymentParams): Promise<ConfirmPaymentResult> {
+    try {
+      const response = await fetch(`${this.baseUrl}/payments/${params.paymentId}/confirm`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workspace_id: params.workspaceId,
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Tribute API error: ${response.status} ${error}`)
+      }
+
+      const data = await response.json()
+
+      return {
+        success: data.status === 'confirmed' || data.status === 'paid',
+        paidAmount: data.amount,
+        currency: data.currency,
+      }
+    } catch (error) {
+      console.error('Tribute confirm error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Tribute payment confirmation failed',
+      }
     }
   }
 
-  async cancelSubscription(_tributeSubscriptionId: string): Promise<{ success: boolean; error?: string }> {
-    return {
-      success: false,
-      error: 'Tribute integration not yet implemented',
+  async cancelSubscription(tributeSubscriptionId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/subscriptions/${tributeSubscriptionId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Tribute API error: ${response.status} ${error}`)
+      }
+
+      return { success: true }
+    } catch (error) {
+      console.error('Tribute cancel error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Tribute cancellation failed',
+      }
     }
   }
 }
