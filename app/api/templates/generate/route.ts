@@ -1,52 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateAllTemplates, generateVideoTemplate } from '@/lib/templates/video-generator';
-import { TemplateStyle, Sentiment } from '@/lib/templates/styles';
-import * as path from 'path';
 
 /**
  * POST /api/templates/generate
- * Generate video templates
+ * Generate video templates - stub (canvas not available in build)
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, style, sentiment } = body;
+    const { action } = body;
 
     if (action === 'generate_all') {
-      // Generate all templates (long operation - run in background)
-      console.log('Starting generation of all templates...');
-      
-      // Run async without waiting
-      generateAllTemplates().catch((error) => {
-        console.error('Template generation failed:', error);
-      });
-
       return NextResponse.json({
-        message: 'Template generation started in background. This may take 30-60 minutes.',
-        status: 'processing',
+        message: 'Template generation requires canvas. Run locally with canvas dependencies installed.',
+        status: 'not_available',
       });
     }
 
-    if (action === 'generate_one' && style && sentiment) {
-      // Generate single template
-      const outputPath = path.join(
-        process.cwd(),
-        'public',
-        'templates',
-        'backgrounds',
-        `${style}_${sentiment}.mp4`
-      );
-
-      await generateVideoTemplate({
-        style: style as TemplateStyle,
-        sentiment: sentiment as Sentiment,
-        duration: 30,
-        outputPath,
-      });
-
+    if (action === 'generate_one') {
       return NextResponse.json({
-        message: 'Template generated successfully',
-        path: `/templates/backgrounds/${style}_${sentiment}.mp4`,
+        message: 'Template generation requires canvas. Run locally with canvas dependencies installed.',
+        status: 'not_available',
       });
     }
 
@@ -65,21 +38,11 @@ export async function POST(request: NextRequest) {
  * Get generation status and available templates
  */
 export async function GET() {
-  try {
-    const { getAvailableTemplates } = await import('@/lib/templates/video-generator');
-    const templates = getAvailableTemplates();
-
-    return NextResponse.json({
-      total: templates.length,
-      expected: 30, // 10 styles × 3 sentiments
-      templates,
-      complete: templates.length === 30,
-    });
-  } catch (error: any) {
-    console.error('Error fetching templates:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch templates', details: error.message },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({
+    total: 0,
+    expected: 30,
+    templates: [],
+    complete: false,
+    note: 'Template backgrounds require local canvas rendering. The app uses dynamic FFmpeg-generated backgrounds instead.',
+  });
 }
