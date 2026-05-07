@@ -123,7 +123,12 @@ model BrandPreset {
 model Plan {
   id             String @id @default(cuid())
   tier           String @unique
+  slug           String @unique
   name           String
+  description    String?
+  price          Float
+  currency       String @default("USD")
+  interval       String @default("month")
   priceMonthly   Int
   priceYearly    Int
   generationsPerMonth Int
@@ -132,6 +137,7 @@ model Plan {
   maxVoices      Int
   storageGb      Int
   features       Json   @default("[]")
+  isActive       Boolean @default(true)
 
   createdAt DateTime @default(now())
 
@@ -143,7 +149,7 @@ model Plan {
 model Subscription {
   id                 String             @id @default(cuid())
   status             SubscriptionStatus @default(INCOMPLETE)
-  generationsQuota   Int                @default(0)
+  generationsLimit   Int                @default(0)
   generationsUsed    Int                @default(0)
   currentPeriodStart DateTime?
   currentPeriodEnd   DateTime?
