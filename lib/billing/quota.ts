@@ -21,8 +21,8 @@ export async function checkQuota(workspaceId: string): Promise<boolean> {
 
   const { subscription } = workspace;
 
-  // Check if subscription is active or trialing
-  if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+  // Check if subscription is active
+  if (subscription.status !== 'ACTIVE') {
     return false;
   }
 
