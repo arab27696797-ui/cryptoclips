@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAuth, requireWorkspace } from '@/lib/auth/session';
-import { refineScript } from '@/lib/ai/openrouter';
+import { requireAuth, getUserWorkspace } from '@/lib/auth';
+import { OpenRouterProvider } from '@/lib/ai/openrouter';
 
 export async function POST(request: NextRequest) {
   try {
     const session = await requireAuth();
-    const workspace = await requireWorkspace();
+    const workspace = await getUserWorkspace(session.sub);
     const body = await request.json();
 
     const { scriptVersionId, feedback } = body;
@@ -40,40 +40,56 @@ export async function POST(request: NextRequest) {
     }
 
     // Check workspace ownership
-    if (currentScript.project.workspaceId !== workspace.id) {
+    if (currentScript.project.workspaceId !== workspace?.id) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 403 }
       );
     }
 
+    // Build full text from script
+    const scenes = typeof currentScript.scenes === 'string'
+      ? JSON.parse(currentScript.scenes)
+      : currentScript.scenes || [];
+    const fullText = [currentScript.hook, ...scenes.map((s: any) => s.text), currentScript.cta].join('. ');
+
     // Refine script using OpenRouter
-    const refinedData = await refineScript(currentScript.fullText, feedback);
+    const provider = new OpenRouterProvider();
+    const refinedData = await provider.refineScript(fullText, feedback);
 
     // Create new version
-    const newVersion = currentScript.version + 1;
+    const latestVersion = await prisma.scriptVersion.findFirst({
+      where: { projectId: currentScript.projectId },
+      orderBy: { versionNumber: 'desc' },
+      select: { versionNumber: true },
+    });
+
+    const newVersion = (latestVersion?.versionNumber || 0) + 1;
+
+    const hook = refinedData.hook || 'Updated script';
+    const cta = refinedData.cta || 'Follow for more updates';
+    const newScenes = refinedData.scenes || [{ text: refinedData.script, duration: currentScript.totalDuration }];
 
     const newScriptVersion = await prisma.scriptVersion.create({
       data: {
         projectId: currentScript.projectId,
-        version: newVersion,
-        hook: refinedData.hook,
-        body: refinedData.body,
-        cta: refinedData.cta,
-        fullText: refinedData.fullText,
-        wordCount: refinedData.wordCount,
-        duration: currentScript.duration,
+        versionNumber: newVersion,
+        hook,
+        cta,
+        scenes: JSON.stringify(newScenes),
+        totalDuration: currentScript.totalDuration,
         angle: currentScript.angle,
-        style: currentScript.style,
+        isActive: true,
       },
     });
 
-    // Update project current version
-    await prisma.project.update({
-      where: { id: currentScript.projectId },
-      data: {
-        currentScriptVersionId: newScriptVersion.id,
+    // Deactivate old versions
+    await prisma.scriptVersion.updateMany({
+      where: {
+        projectId: currentScript.projectId,
+        id: { not: newScriptVersion.id },
       },
+      data: { isActive: false },
     });
 
     return NextResponse.json({
@@ -83,7 +99,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Refine script error:', error);
 
-    if (error instanceof Error && error.message === 'Authentication required') {
+    if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
