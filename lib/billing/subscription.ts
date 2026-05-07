@@ -26,7 +26,7 @@ export async function activateSubscription(params: {
   const baseData = {
     planId,
     status: 'ACTIVE' as const,
-    generationsQuota: plan.generationsPerMonth,
+    generationsLimit: plan.generationsPerMonth,
     generationsUsed: 0,
     currentPeriodStart: now,
     currentPeriodEnd: periodEnd,
@@ -82,7 +82,7 @@ export async function renewSubscription(workspaceId: string) {
   const renewed = await prisma.subscription.update({
     where: { workspaceId },
     data: {
-      generationsQuota: subscription.plan.generationsPerMonth,
+      generationsLimit: subscription.plan.generationsPerMonth,
       generationsUsed: 0,
       currentPeriodStart: now,
       currentPeriodEnd: newPeriodEnd,
@@ -180,7 +180,7 @@ export async function checkGenerationsQuota(workspaceId: string): Promise<{
     return {
       hasQuota: false,
       used: subscription.generationsUsed,
-      quota: subscription.generationsQuota,
+      quota: subscription.generationsLimit,
     }
   }
 
@@ -195,7 +195,7 @@ export async function checkGenerationsQuota(workspaceId: string): Promise<{
         return {
           hasQuota: true,
           used: renewed.subscription.generationsUsed,
-          quota: renewed.subscription.generationsQuota,
+          quota: renewed.subscription.generationsLimit,
         }
       }
     }
@@ -210,13 +210,13 @@ export async function checkGenerationsQuota(workspaceId: string): Promise<{
     return {
       hasQuota: false,
       used: subscription.generationsUsed,
-      quota: subscription.generationsQuota,
+      quota: subscription.generationsLimit,
     }
   }
 
   return {
-    hasQuota: subscription.generationsUsed < subscription.generationsQuota,
+    hasQuota: subscription.generationsUsed < subscription.generationsLimit,
     used: subscription.generationsUsed,
-    quota: subscription.generationsQuota,
+    quota: subscription.generationsLimit,
   }
 }
