@@ -110,10 +110,10 @@ export async function POST(request: Request) {
       usage: updatedSubscription
         ? {
             used: updatedSubscription.generationsUsed,
-            quota: updatedSubscription.generationsQuota,
+            quota: updatedSubscription.generationsLimit,
             remaining: Math.max(
               0,
-              updatedSubscription.generationsQuota - updatedSubscription.generationsUsed,
+              updatedSubscription.generationsLimit - updatedSubscription.generationsUsed,
             ),
           }
         : {
