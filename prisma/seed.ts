@@ -115,7 +115,7 @@ async function main() {
   console.log('Seed completed successfully!');
   console.log('\nPlans created:');
   console.log(`- ${starterPlan.name}: $${starterPlan.price}/month - ${starterPlan.generationsPerMonth} generations`);
-  console.log(`- ${proPlan.name}: $${starterPlan.price}/month - ${proPlan.generationsPerMonth} generations`);
+  console.log(`- ${proPlan.name}: $${proPlan.price}/month - ${proPlan.generationsPerMonth} generations`);
   console.log(`- ${creatorPlan.name}: $${creatorPlan.price}/month - ${creatorPlan.generationsPerMonth} generations`);
 }
 
