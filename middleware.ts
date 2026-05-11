@@ -4,84 +4,152 @@ import { jwtVerify } from 'jose'
 
 function getSecret() {
   const secret = process.env.JWT_SECRET
-
-  if (!secret) {
-    throw new Error('JWT_SECRET environment variable is not set')
-  }
-
+  if (!secret) throw new Error('JWT_SECRET environment variable is not set')
   return new TextEncoder().encode(secret)
 }
 
+// Routes that are always public — no auth needed
+const PUBLIC_PATHS = ['/', '/pricing', '/login', '/register', '/sign-in', '/sign-up']
+
+// API routes that never need auth
+const PUBLIC_API_PREFIXES = [
+  '/api/auth',
+  '/api/plans',
+  '/api/billing/plans',
+  '/api/webhooks',
+]
+
+// Routes that need a valid JWT but NOT an active subscription
+// (e.g. the billing flow itself — user needs to be able to pay)
+const AUTH_ONLY_PREFIXES = [
+  '/api/billing/checkout',
+  '/api/billing/confirm',
+  '/api/billing/subscription',
+  '/api/billing/cancel',
+  '/api/billing/reactivate',
+]
+
+// Routes that need both a valid JWT AND an active subscription
+const PROTECTED_PREFIXES = [
+  '/dashboard',
+  '/api/workspaces',
+  '/api/brand-presets',
+  '/api/projects',
+  '/api/voices',
+  '/api/templates',
+  '/api/renders',
+  '/api/upload',
+  '/api/scripts',
+]
+
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
   const session = request.cookies.get('cryptoclips_session')?.value
 
-  const isAuthPage =
-    request.nextUrl.pathname === '/login' ||
-    request.nextUrl.pathname === '/register' ||
-    request.nextUrl.pathname === '/sign-in' ||
-    request.nextUrl.pathname === '/sign-up'
-
-  const isPricingPage = request.nextUrl.pathname === '/pricing'
-  const isApiAuth = request.nextUrl.pathname.startsWith('/api/auth')
-  const isApiPublic = request.nextUrl.pathname === '/api/plans'
-  const isWebhook = request.nextUrl.pathname.startsWith('/api/webhooks')
-
-  if (isApiAuth || isApiPublic || isWebhook) {
+  // Always allow static assets
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon') ||
+    pathname.startsWith('/public')
+  ) {
     return NextResponse.next()
   }
 
-  if (isAuthPage && session) {
+  // Always allow public API routes
+  if (PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next()
+  }
+
+  // Verify JWT helper — returns payload or null
+  async function verifyJWT() {
+    if (!session) return null
     try {
-      await jwtVerify(session, getSecret(), { clockTolerance: 60 })
-      return NextResponse.redirect(new URL('/dashboard', request.url))
+      const { payload } = await jwtVerify(session, getSecret(), { clockTolerance: 60 })
+      return payload
     } catch {
-      return NextResponse.next()
+      return null
     }
   }
 
-  const isProtected =
-    request.nextUrl.pathname.startsWith('/dashboard') ||
-    request.nextUrl.pathname.startsWith('/api/workspaces') ||
-    request.nextUrl.pathname.startsWith('/api/brand-presets') ||
-    request.nextUrl.pathname.startsWith('/api/projects') ||
-    request.nextUrl.pathname.startsWith('/api/voices') ||
-    request.nextUrl.pathname.startsWith('/api/templates') ||
-    request.nextUrl.pathname.startsWith('/api/renders') ||
-    request.nextUrl.pathname.startsWith('/api/upload') ||
-    request.nextUrl.pathname.startsWith('/api/billing') ||
-    request.nextUrl.pathname.startsWith('/api/scripts')
+  // Public pages — if already logged in, redirect to dashboard
+  if (PUBLIC_PATHS.includes(pathname)) {
+    const payload = await verifyJWT()
+    if (payload && pathname !== '/') {
+      // Logged-in user hitting /login or /register → send to dashboard
+      if (pathname === '/login' || pathname === '/register' || pathname === '/sign-in' || pathname === '/sign-up') {
+        return NextResponse.redirect(new URL('/dashboard', request.url))
+      }
+    }
+    return NextResponse.next()
+  }
 
-  if (isProtected || isPricingPage) {
-    if (!session) {
-      if (request.nextUrl.pathname.startsWith('/api')) {
+  // AUTH_ONLY routes — need valid JWT, no subscription check
+  if (AUTH_ONLY_PREFIXES.some((p) => pathname.startsWith(p))) {
+    const payload = await verifyJWT()
+    if (!payload) {
+      if (pathname.startsWith('/api/')) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       }
-
       return NextResponse.redirect(new URL('/login', request.url))
     }
+    return NextResponse.next()
+  }
 
-    try {
-      const verified = await jwtVerify(session, getSecret(), { clockTolerance: 60 })
-      const payload = verified.payload
+  // PROTECTED routes — need JWT + ACTIVE subscription
+  if (PROTECTED_PREFIXES.some((p) => pathname.startsWith(p))) {
+    const payload = await verifyJWT()
 
-      if (isProtected && !isPricingPage) {
-        const workspaceId = payload.workspaceId as string | undefined
-        if (!workspaceId) {
-          return NextResponse.redirect(new URL('/pricing', request.url))
-        }
+    // No valid JWT at all
+    if (!payload) {
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       }
-
-      return NextResponse.next()
-    } catch {
-      const response = isAuthPage
-        ? NextResponse.next()
-        : request.nextUrl.pathname.startsWith('/api')
-          ? NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-          : NextResponse.redirect(new URL('/login', request.url))
-
+      // Clear stale cookie
+      const response = NextResponse.redirect(new URL('/login', request.url))
       response.cookies.set('cryptoclips_session', '', { maxAge: 0, path: '/' })
       return response
     }
+
+    // Has JWT but no workspaceId in token — force to pricing
+    const workspaceId = payload.workspaceId as string | undefined
+    if (!workspaceId) {
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: 'No active subscription' }, { status: 403 })
+      }
+      return NextResponse.redirect(new URL('/pricing', request.url))
+    }
+
+    // Check subscription status via DB — attach header for downstream use
+    // We use a lightweight inline fetch to /api/billing/subscription/status
+    // to avoid importing Prisma in Edge runtime (not supported)
+    try {
+      const statusUrl = new URL('/api/billing/subscription/status', request.url)
+      const statusRes = await fetch(statusUrl.toString(), {
+        headers: {
+          cookie: request.headers.get('cookie') || '',
+          'x-middleware-check': '1',
+        },
+      })
+
+      if (statusRes.ok) {
+        const { status } = await statusRes.json()
+        if (status !== 'ACTIVE') {
+          if (pathname.startsWith('/api/')) {
+            return NextResponse.json(
+              { error: 'Subscription required', subscriptionStatus: status },
+              { status: 403 }
+            )
+          }
+          return NextResponse.redirect(new URL('/pricing?reason=subscription_required', request.url))
+        }
+      }
+      // If status check fails for any reason — let through (fail open)
+      // to avoid locking out users due to a DB hiccup
+    } catch {
+      // Fail open — do not block user if status check throws
+    }
+
+    return NextResponse.next()
   }
 
   return NextResponse.next()
