@@ -1,9 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone', // ← НОВАЯ СТРОКА для Railway!
-  experimental: {
-    serverComponentsExternalPackages: ['prisma', '@prisma/client'],
-  },
+  output: 'standalone',
+  serverExternalPackages: [
+    'prisma',
+    '@prisma/client',
+    'canvas',
+    'fluent-ffmpeg',
+    'edge-tts',
+    '@ffmpeg-installer/ffmpeg',
+  ],
+  experimental: {},
 }
 
 export default nextConfig
