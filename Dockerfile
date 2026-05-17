@@ -12,17 +12,21 @@ RUN apk add --no-cache \
     libjpeg-turbo-dev \
     freetype-dev \
     ffmpeg \
+    openssl \
     python3 \
     make \
     g++
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files AND prisma schema before install
+# (required because postinstall runs "prisma generate")
 COPY package.json package-lock.json* ./
+COPY prisma ./prisma
 
-# Install dependencies (changed from npm ci to npm install)
-RUN npm install
+# Install dependencies (--ignore-scripts skips postinstall,
+# we run prisma generate manually below with schema present)
+RUN npm install --ignore-scripts
 
 # Builder stage
 FROM node:18-alpine AS builder
@@ -36,6 +40,7 @@ RUN apk add --no-cache \
     pangomm-dev \
     libjpeg-turbo-dev \
     freetype-dev \
+    openssl \
     python3 \
     make \
     g++
@@ -45,7 +50,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Generate Prisma Client
+# Generate Prisma Client (schema is now available)
 RUN npx prisma generate
 
 # Build Next.js
@@ -64,6 +69,7 @@ RUN apk add --no-cache \
     pangomm \
     libjpeg-turbo \
     freetype \
+    openssl \
     ffmpeg
 
 WORKDIR /app
